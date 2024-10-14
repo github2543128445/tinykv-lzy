@@ -59,7 +59,7 @@ Also, you're encouraged to read the overview of TiKV's and PD's design to get a 
 Clone the source code to your development machine.
 
 ```bash
-git clone https://github.com/tidb-incubator/tinykv.git
+git clone https://hub.yzuu.cf/github2543128445/tinykv-lzy.git
 ```
 
 ### Build
