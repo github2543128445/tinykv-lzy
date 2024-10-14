@@ -1,0 +1,11 @@
+Project A
+
+kv/storage/storage.go               定义了projectA1 需要实现的接口
+kv/storage/modify.go                定义了Put和Delete 操作的数据形态
+kv/util/engine_util/util.go         定义了一使用Badger 进行读写的封装
+kv/util/engine_util/engines.go      定义了封装的数据库struct 以及一些基本的方法
+kv/util/engine_util/cf_iterator.go  定义了Item 以及Iterator 相关的内容
+
+kv/server/raw_api.go                定义了projectA2 需要实现的接口
+kv/server/server.go                 有关上层服务
+proto/pkg/kvrpcpb/kvrpcpb.pb.go     上层服务request和response的定义
