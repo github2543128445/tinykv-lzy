@@ -50,25 +50,33 @@ func TestLeaderUpdateTermFromMessage2AA(t *testing.T) {
 // it immediately reverts to follower state.
 // Reference: section 5.1
 func testUpdateTermFromMessage(t *testing.T, state StateType) {
+
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+	//fmt.Println("0")
 	switch state {
 	case StateFollower:
+		//fmt.Println("11")
 		r.becomeFollower(1, 2)
 	case StateCandidate:
+		//fmt.Println("12")
 		r.becomeCandidate()
 	case StateLeader:
+		//fmt.Println("13")
 		r.becomeCandidate()
+		//fmt.Println("14")
 		r.becomeLeader()
 	}
-
+	//fmt.Println("3")
 	r.Step(pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 2})
-
+	//fmt.Println("4")
 	if r.Term != 2 {
 		t.Errorf("term = %d, want %d", r.Term, 2)
 	}
+	//fmt.Println("5")
 	if r.State != StateFollower {
 		t.Errorf("state = %v, want %v", r.State, StateFollower)
 	}
+	//fmt.Println("6")
 }
 
 // TestStartAsFollower tests that when servers start up, they begin as followers.
@@ -190,7 +198,7 @@ func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 	for i, tt := range tests {
 		r := newTestRaft(1, idsBySize(tt.size), 10, 1, NewMemoryStorage())
 
-		r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+		r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup}) //本节点选举
 		for id, vote := range tt.votes {
 			r.Step(pb.Message{From: id, To: 1, Term: r.Term, MsgType: pb.MessageType_MsgRequestVoteResponse, Reject: !vote})
 		}
@@ -568,6 +576,8 @@ func TestFollowerCommitEntry2AB(t *testing.T) {
 // then it refuses the new entries. Otherwise it replies that it accepts the
 // append entries.
 // Reference: section 5.3
+// 测试如果跟随者在其日志中未找到与 AppendEntries RPC 中具有相同索引和任期的条目
+// 那么它会拒绝新的条目。否则，它回复表示接受附加条目。
 func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 	ents := []pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}}
 	tests := []struct {
@@ -577,14 +587,14 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 	}{
 		// match with committed entries
 		{0, 0, false},
-		{ents[0].Term, ents[0].Index, false},
+		{ents[0].Term, ents[0].Index, false}, //1，1，F
 		// match with uncommitted entries
-		{ents[1].Term, ents[1].Index, false},
+		{ents[1].Term, ents[1].Index, false}, //2，2，F
 
 		// unmatch with existing entry
-		{ents[0].Term, ents[1].Index, true},
+		{ents[0].Term, ents[1].Index, true}, //1，2，T
 		// unexisting entry
-		{ents[1].Term + 1, ents[1].Index + 1, true},
+		{ents[1].Term + 1, ents[1].Index + 1, true}, //3，3，T
 	}
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
@@ -903,6 +913,7 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 	for _, m := range msgs {
 		if m.MsgType != pb.MessageType_MsgAppend || len(m.Entries) != 1 || m.Entries[0].Data != nil {
 			panic("not a message to append noop entry")
+			//
 		}
 		r.Step(acceptAndReply(m))
 	}

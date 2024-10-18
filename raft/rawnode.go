@@ -36,19 +36,27 @@ type SoftState struct {
 // Ready encapsulates the entries and messages that are ready to read,
 // be saved to stable storage, committed or sent to other peers.
 // All fields in Ready are read-only.
+// Ready 封装了【准备读取、保存到稳定存储、提交、发送给其他节点】的条目和消息。
+// Ready 中的所有字段都是只读的。
 type Ready struct {
 	// The current volatile state of a Node.
 	// SoftState will be nil if there is no update.
 	// It is not required to consume or store SoftState.
+	// 节点的当前易失性状态。
+	// 如果没有更新，SoftState 将为 nil。
+	// 不需要使用或存储 SoftState。
 	*SoftState
 
 	// The current state of a Node to be saved to stable storage BEFORE
 	// Messages are sent.
 	// HardState will be equal to empty state if there is no update.
+	// 在发送消息之前要保存到稳定存储中的节点的当前状态。
+	// 如果没有更新，HardState 将等于空状态。
 	pb.HardState
 
 	// Entries specifies entries to be saved to stable storage BEFORE
 	// Messages are sent.
+	// Entries 指定在发送消息之前要保存到稳定存储中的条目。
 	Entries []pb.Entry
 
 	// Snapshot specifies the snapshot to be saved to stable storage.
@@ -57,12 +65,17 @@ type Ready struct {
 	// CommittedEntries specifies entries to be committed to a
 	// store/state-machine. These have previously been committed to stable
 	// store.
+
+	// CommittedEntries 指定要提交到存储 / 状态机的条目。这些之前已提交到稳定存储。
 	CommittedEntries []pb.Entry
 
 	// Messages specifies outbound messages to be sent AFTER Entries are
 	// committed to stable storage.
 	// If it contains a MessageType_MsgSnapshot message, the application MUST report back to raft
 	// when the snapshot has been received or has failed by calling ReportSnapshot.
+	// Messages 指定在条目提交到稳定存储后要发送的出站消息。
+	// 如果它包含 MessageType_MsgSnapshot 消息
+	// 应用程序必须在收到快照或快照失败时通过调用 ReportSnapshot 向 raft 报告。
 	Messages []pb.Message
 }
 
@@ -70,6 +83,7 @@ type Ready struct {
 type RawNode struct {
 	Raft *Raft
 	// Your Data Here (2A).
+
 }
 
 // NewRawNode returns a new RawNode given configuration and a list of raft peers.

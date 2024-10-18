@@ -101,6 +101,8 @@ func TestLeaderElection2AA(t *testing.T) {
 // testLeaderCycle verifies that each node in a cluster can campaign
 // and be elected in turn. This ensures that elections work when not
 // starting from a clean slate (as they do in TestLeaderElection)
+// testLeaderCycle 验证集群中的每个节点可以依次竞选并当选。
+// 这确保了选举在并非从头开始的情况下（如在 TestLeaderElection 中）能够正常工作
 func TestLeaderCycle2AA(t *testing.T) {
 	var cfg func(*Config)
 	n := newNetworkWithConfig(cfg, nil, nil, nil)
@@ -562,10 +564,10 @@ func TestProposal2AB(t *testing.T) {
 }
 
 // TestHandleMessageType_MsgAppend ensures:
-// 1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
-// 2. If an existing entry conflicts with a new one (same index but different terms),
-//    delete the existing entry and all that follow it; append any new entries not already in the log.
-// 3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
+//  1. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm.
+//  2. If an existing entry conflicts with a new one (same index but different terms),
+//     delete the existing entry and all that follow it; append any new entries not already in the log.
+//  3. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry).
 func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 	tests := []struct {
 		m       pb.Message

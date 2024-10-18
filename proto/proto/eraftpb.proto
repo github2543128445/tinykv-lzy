@@ -41,31 +41,31 @@ message Snapshot {
 enum MessageType {
     // 'MessageType_MsgHup' is a local message used for election. If an election timeout happened,
     // the node should pass 'MessageType_MsgHup' to its Step method and start a new election.
-    MsgHup = 0;
+    MsgHup = 0;//让本节点选举
     // 'MessageType_MsgBeat' is a local message that signals the leader to send a heartbeat
     // of the 'MessageType_MsgHeartbeat' type to its followers.
-    MsgBeat = 1;
+    MsgBeat = 1;//让领导发心跳
     // 'MessageType_MsgPropose' is a local message that proposes to append data to the leader's log entries.
-    MsgPropose = 2;
+    MsgPropose = 2;//为领导增加entry
     // 'MessageType_MsgAppend' contains log entries to replicate.
-    MsgAppend = 3;
+    MsgAppend = 3;//收到来自领导的备份
     // 'MessageType_MsgAppendResponse' is response to log replication request('MessageType_MsgAppend').
-    MsgAppendResponse = 4;
+    MsgAppendResponse = 4;//回应领导的备份
     // 'MessageType_MsgRequestVote' requests votes for election.
-    MsgRequestVote = 5;
+    MsgRequestVote = 5;//来拉票的信息
     // 'MessageType_MsgRequestVoteResponse' contains responses from voting request.
-    MsgRequestVoteResponse = 6;
+    MsgRequestVoteResponse = 6;//拉票回应
     // 'MessageType_MsgSnapshot' requests to install a snapshot message.
-    MsgSnapshot = 7;
+    MsgSnapshot = 7;//安装快照
     // 'MessageType_MsgHeartbeat' sends heartbeat from leader to its followers.
-    MsgHeartbeat = 8;
+    MsgHeartbeat = 8;//收到心跳
     // 'MessageType_MsgHeartbeatResponse' is a response to 'MessageType_MsgHeartbeat'.
-    MsgHeartbeatResponse = 9;
+    MsgHeartbeatResponse = 9;//收到心跳的回应
     // 'MessageType_MsgTransferLeader' requests the leader to transfer its leadership.
-    MsgTransferLeader = 11;
+    MsgTransferLeader = 11;//要求领导下台
     // 'MessageType_MsgTimeoutNow' send from the leader to the leadership transfer target, to let
     // the transfer target timeout immediately and start a new election.
-    MsgTimeoutNow = 12;
+    MsgTimeoutNow = 12;//由领导者发送给领导权转移目标，让转移目标立即超时并开始新的选举。
 }
 
 message Message {

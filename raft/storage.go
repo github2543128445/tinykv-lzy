@@ -55,6 +55,8 @@ type Storage interface {
 	// [FirstIndex()-1, LastIndex()]. The term of the entry before
 	// FirstIndex is retained for matching purposes even though the
 	// rest of that entry may not be available.
+	// Term 返回索引为 i 的条目的任期，其必须在 [FirstIndex () - 1, LastIndex ()] 范围内。
+	// 尽管可能无法获取索引在 FirstIndex 之前的条目的其余部分，但为了匹配目的仍保留其任期。
 	Term(i uint64) (uint64, error)
 	// LastIndex returns the index of the last entry in the log.
 	LastIndex() (uint64, error)
