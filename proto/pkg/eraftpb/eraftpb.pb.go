@@ -460,6 +460,7 @@ func (m *Message) GetReject() bool {
 
 // HardState contains the state of a node need to be peristed, including the current term, commit index
 // and the vote record
+//HardState 包含一个节点需要持久化的状态，包括当前任期、提交索引和投票记录
 type HardState struct {
 	Term                 uint64   `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
 	Vote                 uint64   `protobuf:"varint,2,opt,name=vote,proto3" json:"vote,omitempty"`

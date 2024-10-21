@@ -20,7 +20,7 @@ node包含raft，raft包含raftlog，raftlog包含storage
 
 raft/raft.go                        定义了Raft的核心内容（需要补充代码）
 raft/log.go                         定义了RaftLog的核心内容（需要补充代码）
-raft/rawnode.go                     定义了RaftNode的核心内容（需要补充代码）                
+raft/rawnode.go                     定义了Node的核心内容（需要补充代码）                
 proto/proto/eraftpb.proto           定义了Raft发送和接受信息相关的struct
 raft/doc.go                         包含了总体设计以及MessageTypes各自职能
 kv/raftstore/node.go                定义了有关raft节点的结构以及一些方法
