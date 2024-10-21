@@ -624,13 +624,15 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 // and append any new entries not already in the log.
 // Also, it writes the new entry into stable storage.
 // Reference: section 5.3
+// 当 AppendEntries RPC 有效时，跟随者将删除现有的冲突条目及其后的所有条目，并附加任何尚未在日志中的新条目。
+// 此外，它将新条目写入稳定存储。
 func TestFollowerAppendEntries2AB(t *testing.T) {
 	tests := []struct {
-		index, term uint64
-		lterm       uint64
-		ents        []*pb.Entry
-		wents       []*pb.Entry
-		wunstable   []*pb.Entry
+		index, term uint64      //log i&term
+		lterm       uint64      //node term
+		ents        []*pb.Entry //ent in leader's msg
+		wents       []*pb.Entry //right ans
+		wunstable   []*pb.Entry //unstable ans
 	}{
 		{
 			2, 2, 3,
@@ -668,7 +670,7 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 		wents := make([]pb.Entry, 0, len(tt.wents))
 		for _, ent := range tt.wents {
 			wents = append(wents, *ent)
-		}
+		} //copy
 		if g := r.RaftLog.allEntries(); !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
 		}
@@ -815,6 +817,7 @@ func TestVoteRequest2AB(t *testing.T) {
 // TestVoter tests the voter denies its vote if its own log is more up-to-date
 // than that of the candidate.
 // Reference: section 5.4.1
+// TestVoter 测试如果投票者自身的日志比候选者的日志更新，投票者会拒绝投票。
 func TestVoter2AB(t *testing.T) {
 	tests := []struct {
 		ents    []pb.Entry

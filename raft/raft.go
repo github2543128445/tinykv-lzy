@@ -481,7 +481,7 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 		return nil
 	}
 }
-func (r *Raft) stepMsgRequestVote(m pb.Message) error {
+func (r *Raft) stepMsgRequestVote(m pb.Message) error { //NEXT 看论文到底怎么处理任期问题的
 	resp := pb.Message{
 		MsgType: pb.MessageType_MsgRequestVoteResponse,
 		From:    r.id,
@@ -489,7 +489,10 @@ func (r *Raft) stepMsgRequestVote(m pb.Message) error {
 		Term:    r.Term,
 		Reject:  true,
 	}
-	if m.Term > r.Term || (m.Term == r.Term && (r.Vote == m.From || r.Vote == None) && r.RaftLog.hasNewerData(m.Index, m.LogTerm)) {
+	if m.Term > r.Term { //仅用来更新term和重置timeout
+		r.becomeFollower(m.Term, None)
+	}
+	if (m.Term > r.Term || (m.Term == r.Term && (r.Vote == m.From || r.Vote == None))) && r.RaftLog.hasNewerData(m.Index, m.LogTerm) {
 		resp.Reject = false
 		r.becomeFollower(m.Term, None)
 		r.Vote = m.From
@@ -608,7 +611,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		}
 
 	} else {
-		if len(m.Entries) > 0 { // mayBUG
+		if len(m.Entries) > 0 {
 			baseIndex := m.Index + 1
 			var i uint64 = 0
 			//检查前面有没有冲突
@@ -619,7 +622,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 				}
 			}
 			if i != uint64(len(m.Entries)) {
-				r.RaftLog.DeleteFrom(i)
+				r.RaftLog.DeleteFrom(baseIndex + i)
 				r.RaftLog.AddEntries(m.Entries[i:])
 				r.RaftLog.stabled = min(r.RaftLog.stabled, baseIndex+i-1) //截断可能导致已经持久化的部分减少到新Entry之前
 			}

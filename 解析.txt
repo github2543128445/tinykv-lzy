@@ -17,10 +17,15 @@ Project B
 与论文中不同，本次实现，Heartbeat和AppendEntries作为不同的消息
 node包含raft，raft包含raftlog，raftlog包含storage
 
-proto/proto/eraftpb.proto           定义了Raft发送和接受信息相关的struct
+
 raft/raft.go                        定义了Raft的核心内容（需要补充代码）
+raft/log.go                         定义了RaftLog的核心内容（需要补充代码）
+raft/rawnode.go                     定义了RaftNode的核心内容（需要补充代码）                
+proto/proto/eraftpb.proto           定义了Raft发送和接受信息相关的struct
 raft/doc.go                         包含了总体设计以及MessageTypes各自职能
 kv/raftstore/node.go                定义了有关raft节点的结构以及一些方法
+
+
 
 
 To Deal With:
