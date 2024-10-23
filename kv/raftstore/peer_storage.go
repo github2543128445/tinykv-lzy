@@ -306,8 +306,30 @@ func ClearMeta(engines *engine_util.Engines, kvWB, raftWB *engine_util.WriteBatc
 
 // Append the given entries to the raft log and update ps.raftState also delete log entries that will
 // never be committed
+// 将给定的条目附加到 Raft 日志中，并更新 ps.raftState
+// 同时删除永远不会提交的日志条目
 func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.WriteBatch) error {
 	// Your Code Here (2B).
+	if len(entries) == 0 {
+		return nil
+	}
+	//添加新entry
+	for _, entry := range entries {
+		err := raftWB.SetMeta(meta.RaftLogKey(ps.region.Id, entry.Index), &entry)
+		if err != nil {
+			log.Panic(err)
+		}
+	}
+
+	//若有不一致的情况，长的话就覆盖掉了，短的话就需要删除以前留下的多余部分
+	lastIndex := entries[len(entries)-1].Index
+	preLastIndex, _ := ps.LastIndex()
+	for i := lastIndex + 1; i <= preLastIndex; i++ {
+		raftWB.DeleteMeta(meta.RaftLogKey(ps.region.Id, i))
+	}
+
+	ps.raftState.LastTerm = entries[len(entries)-1].Term
+	ps.raftState.LastIndex = lastIndex
 	return nil
 }
 
@@ -328,10 +350,37 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 
 // Save memory states to disk.
 // Do not modify ready in this function, this is a requirement to advance the ready object properly later.
+// 将内存状态保存到磁盘。
+// 请勿在此函数中修改 ready，这是稍后正确推进 ready 对象的要求。
 func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, error) {
 	// Hint: you may call `Append()` and `ApplySnapshot()` in this function
 	// Your Code Here (2B/2C).
-	return nil, nil
+	raftWB := &engine_util.WriteBatch{}
+	result := &ApplySnapResult{}
+	var err error
+	//TODO about snapshot 这是我抄的
+	if !raft.IsEmptySnap(&ready.Snapshot) { //应用Snapshot
+		kvWB := &engine_util.WriteBatch{}
+		result, err = ps.ApplySnapshot(&ready.Snapshot, kvWB, raftWB)
+		if err != nil {
+			log.Panic(err)
+		}
+		kvWB.MustWriteToDB(ps.Engines.Kv)
+	}
+	//TODO about snapshot
+	err = ps.Append(ready.Entries, raftWB) //保存entry
+	if err != nil {
+		log.Panic(err)
+	}
+	if !raft.IsEmptyHardState(ready.HardState) { //修改HardState
+		*ps.raftState.HardState = ready.HardState
+	}
+	err = raftWB.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState) //写入RaftLocalState
+	if err != nil {
+		log.Panic(err)
+	}
+	raftWB.MustWriteToDB(ps.Engines.Raft)
+	return result, nil
 }
 
 func (ps *PeerStorage) ClearData() {

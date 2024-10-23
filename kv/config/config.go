@@ -62,7 +62,19 @@ const (
 )
 
 func getLogLevel() (logLevel string) {
-	logLevel = "info"
+	logLevel = "fatal" //Change Log
+	//case "fatal":
+	// 	return LOG_LEVEL_FATAL
+	//case "error":
+	// 	return LOG_LEVEL_ERROR
+	//case "warn":
+	// 	return LOG_LEVEL_WARN
+	//case "warning":
+	// 	return LOG_LEVEL_WARN
+	//case "debug":
+	// 	return LOG_LEVEL_DEBUG
+	//case "info":
+	// 	return LOG_LEVEL_INFO
 	if l := os.Getenv("LOG_LEVEL"); len(l) != 0 {
 		logLevel = l
 	}

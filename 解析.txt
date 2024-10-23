@@ -1,4 +1,4 @@
-Project A
+Project 1
 
 kv/storage/storage.go               定义了projectA1 需要实现的接口
 kv/storage/modify.go                定义了Put和Delete 操作的数据形态
@@ -11,8 +11,9 @@ kv/server/server.go                 有关上层服务
 proto/pkg/kvrpcpb/kvrpcpb.pb.go     上层服务request和response的定义
 
 
-Project B
+Project 2
 
+A：
 不要在 Raft 模块本身中设置计时器，上层应用程序负责通过调用 RawNode.Tick () 来推进逻辑时钟
 与论文中不同，本次实现，Heartbeat和AppendEntries作为不同的消息
 node包含raft，raft包含raftlog，raftlog包含storage
@@ -24,10 +25,26 @@ raft/rawnode.go                     定义了Node的核心内容（需要补充�
 proto/proto/eraftpb.proto           定义了Raft发送和接受信息相关的struct
 raft/doc.go                         包含了总体设计以及MessageTypes各自职能
 kv/raftstore/node.go                定义了有关raft节点的结构以及一些方法
-
-
-
-
 To Deal With:
     Follower何时更新自己的lead
     称为leader后Prs[i].Match何时初始化
+    
+B:
+Store代表tinykv-server的一个实例, Peer代表在Store上运行的一个Raft节点, Region是Peers的集合，也称为Raft组
+Project2中，一个 Store 上只会有一个 Peer，一个集群中只会有一个 Region。所以现在不需要考虑 Region 的范围
+
+proto/proto/metapb.proto                    定义了Store、Peer、Region
+proto/proto/raft_serverpb.proto             定义了Storage发送消息的不同状态，
+kv/raftstore/peer_storage.go                PeerStorage的定义以及接口 （补充代码）
+kv/storage/raft_storage/raft_server.go      定义了RaftStorage以及会用到的Storage接口
+proto/proto/raft_cmdpb.proto                定义四种基本命令类型RaftCmdRequeset,现在Reader\Write的kvrpc.Context有用了，携带Regin信息并作为RaftCmdRequest的头部传递
+kv/raftstore/raftstore.go                   定义了Raftstore
+kv/raftstore/raft_worker.go                 本部分Raftstore主要用raftWorker
+kv/raftstore/meta                           定义了一些用于操作kvdb和raftdb的辅助函数
+
+kv/raftstore/peer_msg_handler.go            针对Raft的外部流程驱动（补充代码）
+kv/raftstore/peer.go                        
+kv/raftstore/message/msg.go                 定义了外部驱动用到的msg类型
+
+proto/proto/errorpb.proto                   定义了一些错误，是gRPC的一个字段，错误是本次测试的一部分
+kv/raftstore/util/error.go                  定义了实现 error 接口的相应错误，可以将它们用作函数的返回值。
