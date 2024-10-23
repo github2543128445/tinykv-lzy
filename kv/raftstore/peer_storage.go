@@ -44,7 +44,7 @@ type PeerStorage struct {
 	regionSched chan<- worker.Task
 	// generate snapshot tried count
 	snapTriedCnt int
-	// Engine include two badger instance: Raft and Kv
+	// Engine include two badger instance: Raft and Kv,Kv can be seen as state machine
 	Engines *engine_util.Engines
 	// Tag used for logging
 	Tag string
@@ -320,7 +320,6 @@ func (ps *PeerStorage) Append(entries []eraftpb.Entry, raftWB *engine_util.Write
 			log.Panic(err)
 		}
 	}
-
 	//若有不一致的情况，长的话就覆盖掉了，短的话就需要删除以前留下的多余部分
 	lastIndex := entries[len(entries)-1].Index
 	preLastIndex, _ := ps.LastIndex()
@@ -352,6 +351,10 @@ func (ps *PeerStorage) ApplySnapshot(snapshot *eraftpb.Snapshot, kvWB *engine_ut
 // Do not modify ready in this function, this is a requirement to advance the ready object properly later.
 // 将内存状态保存到磁盘。
 // 请勿在此函数中修改 ready，这是稍后正确推进 ready 对象的要求。
+// 将 raft.Ready 中的数据保存到 badger 中，包括附加日志条目并保存 Raft 硬状态。
+// 附加日志条目将 raft.Ready.Entries 中的所有日志条目保存到 raftdb 中，并删除任何以前附加但永远不会提交的日志条目。
+// 更新PeerStorage的 RaftLocalState 并将其保存到 raftdb 中。（）
+// 保存硬状态也非常容易，只需更新对等存储的 RaftLocalState.HardState 并将其保存到 raftdb 中。
 func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, error) {
 	// Hint: you may call `Append()` and `ApplySnapshot()` in this function
 	// Your Code Here (2B/2C).
@@ -368,18 +371,19 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 		kvWB.MustWriteToDB(ps.Engines.Kv)
 	}
 	//TODO about snapshot
-	err = ps.Append(ready.Entries, raftWB) //保存entry
+	//MayBUG为什么不在这里写RaftApplyState、RegionLocalState
+	err = ps.Append(ready.Entries, raftWB) //保存entry,修改部分raftLocalState
 	if err != nil {
 		log.Panic(err)
 	}
-	if !raft.IsEmptyHardState(ready.HardState) { //修改HardState
+	if !raft.IsEmptyHardState(ready.HardState) { //修改raftLocalState.HardState
 		*ps.raftState.HardState = ready.HardState
 	}
-	err = raftWB.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState) //写入RaftLocalState
+	err = raftWB.SetMeta(meta.RaftStateKey(ps.region.Id), ps.raftState) //写入RaftLocalState到RaftDB
 	if err != nil {
 		log.Panic(err)
 	}
-	raftWB.MustWriteToDB(ps.Engines.Raft)
+	raftWB.MustWriteToDB(ps.Engines.Raft) //完成写入
 	return result, nil
 }
 

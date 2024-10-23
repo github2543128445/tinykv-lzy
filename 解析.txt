@@ -1,3 +1,4 @@
+kv/config/config.go  func getLogLevel() (logLevel string) 调节log的详细程度
 Project 1
 
 kv/storage/storage.go               定义了projectA1 需要实现的接口
@@ -31,7 +32,7 @@ To Deal With:
     
 B:
 Store代表tinykv-server的一个实例, Peer代表在Store上运行的一个Raft节点, Region是Peers的集合，也称为Raft组
-Project2中，一个 Store 上只会有一个 Peer，一个集群中只会有一个 Region。所以现在不需要考虑 Region 的范围
+Project2中，一个 Store 上只会有一个 Peer，一个集群中只会有一个 Region。所以现在不需要考虑 Regi长度on 的范围
 
 proto/proto/metapb.proto                    定义了Store、Peer、Region
 proto/proto/raft_serverpb.proto             定义了Storage发送消息的不同状态，

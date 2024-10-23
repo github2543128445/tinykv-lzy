@@ -67,10 +67,10 @@ func (d *peerMsgHandler) HandleRaftReady() {
 			storeMeta.regionRanges.ReplaceOrInsert(&regionItem{applyResult.Region})
 			storeMeta.Unlock()
 		}
-		//TODO about snapshot
 
 	}
 	d.Send(d.ctx.trans, ready.Messages)
+	//TODO about snapshot ↑
 
 	if len(ready.CommittedEntries) > 0 {
 		kvWB := &engine_util.WriteBatch{}
@@ -80,8 +80,10 @@ func (d *peerMsgHandler) HandleRaftReady() {
 				return
 			}
 		}
+
 		d.peerStorage.applyState.AppliedIndex = ready.CommittedEntries[len(ready.CommittedEntries)-1].Index
 		err := kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
+		//更新RaftApplyState并写入KvDB
 		if err != nil {
 			log.Panic(err)
 		}
@@ -99,6 +101,7 @@ func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, wb *engine_util.
 		log.Panic(err)
 	}
 	if req.AdminRequest == nil {
+		defer 
 		return d.processCommonRequest(entry, req, wb)
 	} else {
 		return wb //TODO about AdminRequest
@@ -193,7 +196,7 @@ func (d *peerMsgHandler) handleProposal(entry *pb.Entry, resp *raft_cmdpb.RaftCm
 
 	}
 }
-func (d *peerMsgHandler) HandleMsg(msg message.Msg) {
+func (d *peerMsgHandler) HandleMsg(msg message.Msg) { //raftWorker无限循环监听消息，有消息就由raftWorker调用handler
 	switch msg.Type {
 	case message.MsgTypeRaftMessage:
 		raftMsg := msg.Data.(*rspb.RaftMessage)
