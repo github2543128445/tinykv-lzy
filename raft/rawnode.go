@@ -194,6 +194,9 @@ func (rn *RawNode) Ready() Ready {
 		}
 	}
 	//TODO next project about snapshot
+	if !IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) {
+		rd.Snapshot = *rn.Raft.RaftLog.pendingSnapshot
+	}
 	return rd
 }
 
@@ -203,8 +206,8 @@ func (rn *RawNode) HasReady() bool {
 	return len(rn.Raft.msgs) > 0 || //消息提交
 		len(rn.Raft.RaftLog.unstableEntries()) > 0 || //需持久化的entry
 		len(rn.Raft.RaftLog.nextEnts()) > 0 || //需Apply的entry
-		rn.isHardStateUpdate() //HSt需要更新
-
+		rn.isHardStateUpdate() || //HSt需要更新
+		!IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) //有加入的快照
 }
 
 // Advance notifies the RawNode that the application has applied and saved progress in the
@@ -219,12 +222,14 @@ func (rn *RawNode) Advance(rd Ready) {
 		rn.preHSt = rd.HardState
 	}
 	if len(rd.Entries) > 0 {
-		rn.Raft.RaftLog.stabled = rd.Entries[len(rd.Entries)-1].Index //MayBUG
+		rn.Raft.RaftLog.stabled = rd.Entries[len(rd.Entries)-1].Index
 	}
 	if len(rd.CommittedEntries) > 0 {
-		rn.Raft.RaftLog.applied = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index //MayBUG
+		rn.Raft.RaftLog.applied = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 	}
 	rn.Raft.msgs = nil
+	rn.Raft.RaftLog.maybeCompact()
+	rn.Raft.RaftLog.pendingSnapshot = nil
 	//TODO about snapshot
 
 }

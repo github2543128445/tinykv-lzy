@@ -9,4 +9,6 @@
 - 需要完成一部分Snapshot，坑
 - 将整个entry作为log写进RaftDB，换言之，RaftDB是做记录用的，不是存储真正的数据
 - 尽管PeerStorage里有RaftLocalState，但是要求要把RaftLocalState“像log一样”写进RaftDB
-- 
+
+
+### Project2B

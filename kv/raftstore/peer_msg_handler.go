@@ -53,11 +53,11 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 
 	ready := d.peer.RaftGroup.Ready()
-	applyResult, err := d.peer.peerStorage.SaveReadyState(&ready) //内部会将有关RaftDB的部分完成写入
+	applyResult, err := d.peer.peerStorage.SaveReadyState(&ready) //内部会将有关RaftDB的部分的log完成写入
 	if err != nil {
 		log.Panic(err)
 	}
-	if applyResult != nil { //TODO about snapshot 这不是我写的，这是直接抄的
+	if applyResult != nil { //about snapshot
 		if !reflect.DeepEqual(applyResult.PrevRegion, applyResult.Region) {
 			d.peerStorage.SetRegion(applyResult.Region)
 			storeMeta := d.ctx.storeMeta
@@ -70,7 +70,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 
 	}
 	d.Send(d.ctx.trans, ready.Messages)
-	//TODO about snapshot ↑
+	//about snapshot ↑
 
 	if len(ready.CommittedEntries) > 0 {
 		kvWB := &engine_util.WriteBatch{}
@@ -101,10 +101,9 @@ func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, wb *engine_util.
 		log.Panic(err)
 	}
 	if req.AdminRequest == nil {
-		defer 
 		return d.processCommonRequest(entry, req, wb)
 	} else {
-		return wb //TODO about AdminRequest
+		return d.processAdminRequest(entry, req, wb) //about AdminRequest
 	}
 
 }
@@ -159,7 +158,7 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 				})
 			}
 		case raft_cmdpb.CmdType_Snap:
-			//TODO about snapshot 以下是抄的
+			//about snapshot
 			if request.Header.RegionEpoch.Version != d.Region().RegionEpoch.Version {
 				BindRespError(resp, &util.ErrEpochNotMatch{})
 			} else {
@@ -175,6 +174,19 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 	}
 	d.handleProposal(entry, resp)
 	return wb
+
+}
+func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+	switch request.AdminRequest.CmdType {
+	case raft_cmdpb.AdminCmdType_CompactLog:
+		if request.AdminRequest.CompactLog.CompactIndex > d.peerStorage.applyState.TruncatedState.Index {
+			d.peerStorage.applyState.TruncatedState.Index = request.AdminRequest.CompactLog.CompactIndex
+			d.peerStorage.applyState.TruncatedState.Term = request.AdminRequest.CompactLog.CompactTerm
+			d.ScheduleCompactLog(request.AdminRequest.CompactLog.CompactIndex)
+		}
+	}
+	//TODO NEXT project
+	return kvWB
 
 }
 func (d *peerMsgHandler) handleProposal(entry *pb.Entry, resp *raft_cmdpb.RaftCmdResponse) {
@@ -283,11 +295,26 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 			log.Panic(err)
 		}
 		//发送entry
-	} else {
-
+	} else { //AdminRequest包含Compact、TransferLeader、ChangePeer、Split
+		d.proposeAdminRequest(msg, cb)
 	}
 }
-
+func (d *peerMsgHandler) proposeAdminRequest(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
+	switch msg.AdminRequest.CmdType {
+	case raft_cmdpb.AdminCmdType_CompactLog:
+		data, err := msg.Marshal()
+		if err != nil {
+			log.Panic(err)
+		}
+		err = d.RaftGroup.Propose(data)
+		if err != nil {
+			log.Panic(err)
+		}
+	case raft_cmdpb.AdminCmdType_ChangePeer: //TODO About Project3
+	case raft_cmdpb.AdminCmdType_TransferLeader:
+	case raft_cmdpb.AdminCmdType_Split:
+	}
+}
 func (d *peerMsgHandler) onTick() {
 	if d.stopped {
 		return
@@ -584,7 +611,7 @@ func (d *peerMsgHandler) onRaftGCLogTick() {
 	appliedIdx := d.peerStorage.AppliedIndex()
 	firstIdx, _ := d.peerStorage.FirstIndex()
 	var compactIdx uint64
-	if appliedIdx > firstIdx && appliedIdx-firstIdx >= d.ctx.cfg.RaftLogGcCountLimit {
+	if appliedIdx > firstIdx && appliedIdx-firstIdx >= d.ctx.cfg.RaftLogGcCountLimit { //需要Compact
 		compactIdx = appliedIdx
 	} else {
 		return

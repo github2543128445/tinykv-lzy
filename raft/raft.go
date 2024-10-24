@@ -121,8 +121,8 @@ type Raft struct {
 	Vote uint64
 
 	// the log
-	RaftLog *RaftLog
 
+	RaftLog *RaftLog
 	// log replication progress of each peers
 	Prs map[uint64]*Progress
 
@@ -211,9 +211,24 @@ func newRaft(c *Config) *Raft {
 	return r
 }
 
+// FirstIndex return the first index of the log entries
+func (l *RaftLog) FirstIndex() uint64 {
+	if len(l.entries) == 0 {
+		index, _ := l.storage.FirstIndex()
+		return index
+	}
+	return l.entries[0].Index
+}
+
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
+// sendAppend 向给定的对等节点发送一个带有新条目（如果有）和当前提交索引的追加 RPC。如果发送了消息则返回 true。
 func (r *Raft) sendAppend(to uint64) bool {
+	//MayBUG 有时出现如下字段：
+	// 	RUN   TestSnapshotUnreliableRecoverConcurrentPartition2C
+	// 2024/10/24 19:42:35 levels.go:823: [warning] STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: 2562047h47m16.854775807s
+	// 2024/10/24 19:42:35 levels.go:846: [warning] Waiting to add level 0 table. Compaction priorities: [{level:0 score:2}]
+
 	// Your Code Here (2A).
 	toPg := r.Prs[to]
 	prevLogIndex := toPg.Next - 1
@@ -236,9 +251,22 @@ func (r *Raft) sendAppend(to uint64) bool {
 		r.msgs = append(r.msgs, appendMsg)
 		//做好发送准备即可
 		return true
+	} else { //在快照中
+		snapshot, err := r.RaftLog.storage.Snapshot()
+		if err != nil { //还没准备好
+			//异步执行，本次没准备好直接不管了，下次再说就是了
+			return false
+		}
+		r.msgs = append(r.msgs, pb.Message{
+			MsgType:  pb.MessageType_MsgSnapshot,
+			From:     r.id,
+			To:       to,
+			Term:     r.Term,
+			Snapshot: &snapshot,
+		})
+		return true //是true还是false根本无所谓，因为没人用返回值
+		//r.Prs[to].Next = snapshot.Metadata.Index + 1 MayBUG 收到snap的节点会发回AppendResponse，leader在那里会更新的
 	}
-	//有可能需要发的已经变成快照了，这是之后的内容了
-	return false
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
@@ -341,6 +369,7 @@ func (r *Raft) leaderStep(m pb.Message) error {
 	case pb.MessageType_MsgRequestVoteResponse:
 	case pb.MessageType_MsgSnapshot:
 		//TODOnextProject
+		//Leader不需要？
 	case pb.MessageType_MsgHeartbeat:
 		//mayBUG领导万一能听到别人的心跳呢
 	case pb.MessageType_MsgHeartbeatResponse:
@@ -366,7 +395,7 @@ func (r *Raft) candidateStep(m pb.Message) error {
 	case pb.MessageType_MsgRequestVoteResponse:
 		return r.stepMsgRequestVoteResponse(m)
 	case pb.MessageType_MsgSnapshot:
-
+		return r.stepMsgSnapshot(m)
 	case pb.MessageType_MsgHeartbeat:
 		return r.stepMsgHeartbeat(m)
 	case pb.MessageType_MsgHeartbeatResponse:
@@ -390,7 +419,7 @@ func (r *Raft) followerStep(m pb.Message) error {
 		return r.stepMsgRequestVote(m)
 	case pb.MessageType_MsgRequestVoteResponse:
 	case pb.MessageType_MsgSnapshot:
-
+		return r.stepMsgSnapshot(m)
 	case pb.MessageType_MsgHeartbeat:
 		return r.stepMsgHeartbeat(m)
 	case pb.MessageType_MsgHeartbeatResponse:
@@ -481,7 +510,7 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 		return nil
 	}
 }
-func (r *Raft) stepMsgRequestVote(m pb.Message) error { //NEXT 看论文到底怎么处理任期问题的
+func (r *Raft) stepMsgRequestVote(m pb.Message) error {
 	resp := pb.Message{
 		MsgType: pb.MessageType_MsgRequestVoteResponse,
 		From:    r.id,
@@ -493,6 +522,7 @@ func (r *Raft) stepMsgRequestVote(m pb.Message) error { //NEXT 看论文到底�
 		r.becomeFollower(m.Term, None)
 	}
 	if (m.Term > r.Term || (m.Term == r.Term && (r.Vote == m.From || r.Vote == None))) && r.RaftLog.hasNewerData(m.Index, m.LogTerm) {
+		//仅在对方有newer数据的时候投票
 		resp.Reject = false
 		r.becomeFollower(m.Term, None)
 		r.Vote = m.From
@@ -522,8 +552,8 @@ func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
 	return nil
 }
 func (r *Raft) stepMsgSnapshot(m pb.Message) error {
+	r.handleSnapshot(m)
 	return nil
-	//TODO nextProject
 }
 func (r *Raft) stepMsgHeartbeat(m pb.Message) error {
 	r.handleHeartbeat(m)
@@ -659,6 +689,39 @@ func (r *Raft) handleHeartbeat(m pb.Message) {
 // handleSnapshot handle Snapshot RPC request
 func (r *Raft) handleSnapshot(m pb.Message) {
 	// Your Code Here (2C).
+	resp := pb.Message{
+		MsgType: pb.MessageType_MsgAppendResponse,
+		From:    r.id,
+		To:      m.From,
+		Reject:  true,
+	}
+	if m.Term >= r.Term {
+		if r.RaftLog.committed >= m.Snapshot.Metadata.Index { //MayBUG Snapshot里的Index是last，拿commited比的意义是什么呢
+			resp.Index = r.RaftLog.committed
+		} else {
+			resp.Reject = false
+			r.becomeFollower(m.Term, m.From)
+			//添加快照
+			r.RaftLog.entries = []pb.Entry{}
+			r.RaftLog.pendingSnapshot = m.Snapshot
+
+			r.RaftLog.dummyIndex = m.Snapshot.Metadata.Index + 1
+			r.RaftLog.committed = m.Snapshot.Metadata.Index
+			r.RaftLog.applied = m.Snapshot.Metadata.Index
+			r.RaftLog.stabled = m.Snapshot.Metadata.Index
+			//根据ConfState修改Peers
+			r.Prs = make(map[uint64]*Progress)
+			if m.Snapshot.Metadata.ConfState != nil {
+				r.Prs = make(map[uint64]*Progress)
+				for _, id := range m.Snapshot.Metadata.ConfState.Nodes {
+					r.Prs[id] = &Progress{Next: r.RaftLog.LastIndex() + 1}
+				}
+			}
+			resp.Index = m.Snapshot.Metadata.Index
+		}
+	}
+	r.msgs = append(r.msgs, resp)
+
 }
 
 // addNode add a new node to raft group

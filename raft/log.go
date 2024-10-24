@@ -78,6 +78,7 @@ func newLog(storage Storage) *RaftLog {
 	ret.entries, _ = storage.Entries(firstIndex, lastIndex+1)
 	ret.pendingSnapshot = nil
 	ret.dummyIndex = firstIndex
+
 	return ret
 
 }
@@ -85,9 +86,19 @@ func newLog(storage Storage) *RaftLog {
 // We need to compact the log entries in some point of time like
 // storage compact stabled log entries prevent the log entries
 // grow unlimitedly in memory
-func (l *RaftLog) maybeCompact() {
+// 我们需要在某些时候压缩日志条目，例如
+// 存储压缩稳定的日志条目以防止日志条目在内存中无限制地增长
+func (l *RaftLog) maybeCompact() { //此时已经完成压缩，需要丢弃被压缩的数据了
 	// Your Code Here (2C).
-	return
+	firstI, _ := l.storage.FirstIndex() //TempBUG
+	if len(l.entries) > 0 {
+		if firstI > l.LastIndex() {
+			l.entries = []pb.Entry{}
+		} else if firstI > l.dummyIndex {
+			l.entries = l.entries[firstI-l.dummyIndex:]
+		}
+	}
+	l.dummyIndex = firstI
 }
 
 // allEntries return all the entries not compacted.
@@ -160,7 +171,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) { //有可能是快照中的，
 	if !IsEmptySnap(l.pendingSnapshot) && i == l.pendingSnapshot.Metadata.Index {
 		return l.pendingSnapshot.Metadata.Term, nil
 	}
-	//快照的TODO
+
 	term, err := l.storage.Term(i)
 	return term, err
 }

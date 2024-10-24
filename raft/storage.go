@@ -69,6 +69,10 @@ type Storage interface {
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,
 	// so raft state machine could know that Storage needs some time to prepare
 	// snapshot and call Snapshot later.
+	// Snapshot 返回最新的快照。
+	// 如果快照暂时不可用，它应该返回 ErrSnapshotTemporarilyUnavailable，
+	// 以便 Raft 状态机知道 Storage 需要一些时间来准备
+	// 快照，并稍后调用 Snapshot。
 	Snapshot() (pb.Snapshot, error)
 }
 

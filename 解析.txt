@@ -49,3 +49,7 @@ kv/raftstore/message/msg.go                 定义了外部驱动用到的msg类
 
 proto/proto/errorpb.proto                   定义了一些错误，是gRPC的一个字段，错误是本次测试的一部分
 kv/raftstore/util/error.go                  定义了实现 error 接口的相应错误，可以将它们用作函数的返回值。
+
+
+C:
+
