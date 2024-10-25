@@ -230,10 +230,13 @@ func (r *Raft) sendAppend(to uint64) bool {
 	// 2024/10/24 19:42:35 levels.go:846: [warning] Waiting to add level 0 table. Compaction priorities: [{level:0 score:2}]
 
 	// Your Code Here (2A).
+	if _, ok := r.Prs[to]; !ok {
+		return false
+	}
 	toPg := r.Prs[to]
-	prevLogIndex := toPg.Next - 1
+	prevLogIndex := toPg.Next - 1 //不要使用match来赋值
 	prevLogTerm, err := r.RaftLog.Term(prevLogIndex)
-	if err == nil {
+	if err == nil && prevLogIndex+1 >= r.RaftLog.dummyIndex {
 		appendMsg := pb.Message{
 			MsgType: pb.MessageType_MsgAppend,
 			To:      to,
@@ -252,10 +255,16 @@ func (r *Raft) sendAppend(to uint64) bool {
 		//做好发送准备即可
 		return true
 	} else { //在快照中
-		snapshot, err := r.RaftLog.storage.Snapshot()
-		if err != nil { //还没准备好
-			//异步执行，本次没准备好直接不管了，下次再说就是了
-			return false
+		var snapshot pb.Snapshot
+		var err error
+		if !IsEmptySnap(r.RaftLog.pendingSnapshot) {
+			snapshot = *r.RaftLog.pendingSnapshot // 挂起的还未处理的快照
+		} else {
+			snapshot, err = r.RaftLog.storage.Snapshot() // 生成一份快照
+			if err != nil {                              //还没准备好
+				//异步执行，本次没准备好直接不管了，下次再说就是了
+				return false
+			}
 		}
 		r.msgs = append(r.msgs, pb.Message{
 			MsgType:  pb.MessageType_MsgSnapshot,
@@ -432,6 +441,9 @@ func (r *Raft) followerStep(m pb.Message) error {
 	return nil
 }
 func (r *Raft) stepMsgHup(m pb.Message) error {
+	if _, ok := r.Prs[r.id]; !ok {
+		return nil
+	}
 	r.becomeCandidate()
 	if len(r.Prs) == 1 {
 		r.becomeLeader()
@@ -490,15 +502,15 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 		if m.Term > r.Term {
 			r.becomeFollower(m.Term, None)
 		} else {
-			r.Prs[m.From].Match = m.Index
-			r.Prs[m.From].Next = m.Index + 1
+			r.Prs[m.From].Next = min(m.Index+1, r.Prs[m.From].Next-1)
+			//未成功，不修改match
 			r.sendAppend(m.From)
 		}
 		return nil
 	} else {
 		if r.Prs[m.From].updateProgress(m.Index) {
 			if r.checkCommit() {
-				for id := range r.Prs { //mayBUG 是不是发的有点多了
+				for id := range r.Prs { //广播commit的更新
 					if id == r.id {
 						continue
 					}
@@ -506,7 +518,7 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 				}
 			}
 		}
-		//3ATODO
+		//3A TODO
 		return nil
 	}
 }
@@ -532,14 +544,18 @@ func (r *Raft) stepMsgRequestVote(m pb.Message) error {
 }
 
 func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
+	vote, ok := r.votes[m.From]
 	r.votes[m.From] = !m.Reject
 	majority := len(r.Prs)/2 + 1
-	if !m.Reject {
-		r.agreedCnt++
+	if !m.Reject { //给投
+		if !ok || (ok && !vote) { //如果没投过票,或者投过反对现在投赞成（一般不会吧）
+			r.agreedCnt++
+		}
+
 	} else {
 		if r.Term < m.Term {
 			r.becomeFollower(m.Term, None)
-		} //mayBUG有newer的数据的不管吗
+		}
 	}
 
 	if r.agreedCnt >= majority {
@@ -645,7 +661,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			baseIndex := m.Index + 1
 			var i uint64 = 0
 			//检查前面有没有冲突
-			for ; baseIndex+i < r.RaftLog.LastIndex() && baseIndex+i <= m.Entries[len(m.Entries)-1].Index; i++ { // < mayBUG
+			for ; baseIndex+i <= r.RaftLog.LastIndex() && baseIndex+i <= m.Entries[len(m.Entries)-1].Index; i++ { // < mayBUG
 				term, _ := r.RaftLog.Term(baseIndex + i)
 				if term != m.Entries[i].Term {
 					break

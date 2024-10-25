@@ -90,7 +90,7 @@ func newLog(storage Storage) *RaftLog {
 // 存储压缩稳定的日志条目以防止日志条目在内存中无限制地增长
 func (l *RaftLog) maybeCompact() { //此时已经完成压缩，需要丢弃被压缩的数据了
 	// Your Code Here (2C).
-	firstI, _ := l.storage.FirstIndex() //TempBUG
+	firstI, _ := l.storage.FirstIndex()
 	if len(l.entries) > 0 {
 		if firstI > l.LastIndex() {
 			l.entries = []pb.Entry{}
@@ -165,7 +165,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) { //有可能是快照中的，
 	if i > l.LastIndex() { //超区，不存在0的term，应该在外面就能检测出冲突来了MAYBUG
 		return 0, nil
 	}
-	if i >= l.dummyIndex {
+	if i >= l.dummyIndex { //就在Entries
 		return l.entries[i-l.dummyIndex].Term, nil
 	}
 	if !IsEmptySnap(l.pendingSnapshot) && i == l.pendingSnapshot.Metadata.Index {
@@ -177,7 +177,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) { //有可能是快照中的，
 }
 
 func (l *RaftLog) DeleteFrom(i uint64) {
-	if i < l.dummyIndex || len(l.entries) <= 0 {
+	if i < l.dummyIndex || len(l.entries) <= 0 || i > l.LastIndex() {
 		return
 	}
 	l.entries = l.entries[:i-l.dummyIndex]
