@@ -11,4 +11,9 @@
 - 尽管PeerStorage里有RaftLocalState，但是要求要把RaftLocalState“像log一样”写进RaftDB
 
 
-### Project2B
+### Project2C
+- 快照生成是快照生成，由Raft内部Leader决定生成并发送给Follower
+- 日志压缩是日志压缩，由上层Handle决定的，是AdminRequest，在Entry Apply时，通过processAdminRequest处理。日志压缩并不生成快照，它只是将超过数量阈值，并已经写入DB的Entry直接删除
+
+
+### 

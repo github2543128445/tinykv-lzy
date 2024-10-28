@@ -13,6 +13,7 @@ import (
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"github.com/pingcap-incubator/tinykv/kv/util/engine_util"
 	"github.com/pingcap-incubator/tinykv/log"
+	"github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/raft_cmdpb"
@@ -69,8 +70,8 @@ func (d *peerMsgHandler) HandleRaftReady() {
 		}
 
 	}
-	d.Send(d.ctx.trans, ready.Messages)
 	//about snapshot ↑
+	d.Send(d.ctx.trans, ready.Messages) //将rawnode.msgs通过上层在节点之间传递
 
 	if len(ready.CommittedEntries) > 0 {
 		kvWB := &engine_util.WriteBatch{}
@@ -91,9 +92,13 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 	d.RaftGroup.Advance(ready)
 }
-func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, wb *engine_util.WriteBatch) *engine_util.WriteBatch {
-	if entry.EntryType == pb.EntryType_EntryConfChange { //TODO about config change
-		return wb
+func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+	if entry.EntryType == pb.EntryType_EntryConfChange {
+		cc := &pb.ConfChange{}
+		if err := cc.Unmarshal(entry.Data); err != nil {
+			log.Panic(err)
+		}
+		return d.processConfChange(entry, cc, kvWB)
 	}
 	req := &raft_cmdpb.RaftCmdRequest{}
 	err := req.Unmarshal(entry.Data) //从Data反序列化，获得真正的指令
@@ -101,14 +106,20 @@ func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, wb *engine_util.
 		log.Panic(err)
 	}
 	if req.AdminRequest == nil {
-		return d.processCommonRequest(entry, req, wb)
+		return d.processCommonRequest(entry, req, kvWB)
 	} else {
-		return d.processAdminRequest(entry, req, wb) //about AdminRequest
+		return d.processAdminRequest(entry, req, kvWB) //about AdminRequest
 	}
 
 }
-
-func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, wb *engine_util.WriteBatch) *engine_util.WriteBatch {
+func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+	msg := &raft_cmdpb.RaftCmdRequest{}
+	if err := msg.Unmarshal(cc.Context); err != nil {
+		log.Panic(err)
+	}
+	return kvWB
+}
+func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
 	resp := &raft_cmdpb.RaftCmdResponse{
 		Header:    &raft_cmdpb.RaftResponseHeader{},
 		Responses: []*raft_cmdpb.Response{},
@@ -122,8 +133,8 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 			if err != nil {
 				BindRespError(resp, err)
 			} else {
-				wb.MustWriteToDB(d.ctx.engine.Kv) //将之前的内容写入KVDB
-				wb.Reset()                        //MayBUG
+				kvWB.MustWriteToDB(d.ctx.engine.Kv) //将之前的内容写入KVDB
+				kvWB.Reset()
 				value, _ := engine_util.GetCF(d.ctx.engine.Kv, cf, key)
 				resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
 					CmdType: raft_cmdpb.CmdType_Get,
@@ -136,9 +147,9 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 			val := req.Put.Value
 			err := util.CheckKeyInRegion(key, d.Region())
 			if err != nil {
-				BindRespError(resp, err) //MayBUG 没有就不Put？尊嘟假嘟
+				BindRespError(resp, err) //这个check是针对区域负责范围的check，并非“是否存在该键值对”
 			} else {
-				wb.SetCF(cf, key, val)
+				kvWB.SetCF(cf, key, val)
 				resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
 					CmdType: raft_cmdpb.CmdType_Put,
 					Put:     &raft_cmdpb.PutResponse{},
@@ -151,7 +162,7 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 			if err != nil {
 				BindRespError(resp, err)
 			} else {
-				wb.DeleteCF(cf, key)
+				kvWB.DeleteCF(cf, key)
 				resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
 					CmdType: raft_cmdpb.CmdType_Delete,
 					Delete:  &raft_cmdpb.DeleteResponse{},
@@ -163,8 +174,8 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 				BindRespError(resp, &util.ErrEpochNotMatch{})
 			} else {
 				// Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
-				wb.MustWriteToDB(d.peerStorage.Engines.Kv)
-				wb = &engine_util.WriteBatch{}
+				kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
+				kvWB = &engine_util.WriteBatch{}
 				resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
 					CmdType: raft_cmdpb.CmdType_Snap,
 					Snap:    &raft_cmdpb.SnapResponse{Region: d.Region()},
@@ -173,7 +184,7 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 		}
 	}
 	d.handleProposal(entry, resp)
-	return wb
+	return kvWB
 
 }
 func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
@@ -184,6 +195,8 @@ func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdp
 			d.peerStorage.applyState.TruncatedState.Term = request.AdminRequest.CompactLog.CompactTerm
 			d.ScheduleCompactLog(request.AdminRequest.CompactLog.CompactIndex)
 		}
+	case raft_cmdpb.AdminCmdType_ChangePeer:
+
 	}
 	//TODO NEXT project
 	return kvWB
@@ -306,12 +319,44 @@ func (d *peerMsgHandler) proposeAdminRequest(msg *raft_cmdpb.RaftCmdRequest, cb 
 		if err != nil {
 			log.Panic(err)
 		}
+		d.peer.proposals = append(d.peer.proposals, &proposal{ //记录proposal
+			d.peer.RaftGroup.Raft.RaftLog.LastIndex() + 1,
+			d.peer.RaftGroup.Raft.Term,
+			cb, //记录Callback
+		})
 		err = d.RaftGroup.Propose(data)
 		if err != nil {
 			log.Panic(err)
 		}
-	case raft_cmdpb.AdminCmdType_ChangePeer: //TODO About Project3
+	case raft_cmdpb.AdminCmdType_ChangePeer:
+		data, err := msg.Marshal()
+		if err != nil {
+			log.Panic(err)
+		}
+		CC := eraftpb.ConfChange{
+			ChangeType: msg.AdminRequest.ChangePeer.ChangeType,
+			NodeId:     msg.AdminRequest.ChangePeer.Peer.Id,
+			Context:    data,
+		}
+		err = d.RaftGroup.ProposeConfChange(CC)
+		if err != nil {
+			cb.Done(ErrResp(&util.ErrStaleCommand{}))
+			return
+		}
+		d.peer.proposals = append(d.peer.proposals, &proposal{ //记录proposal
+			d.peer.RaftGroup.Raft.RaftLog.LastIndex() + 1,
+			d.peer.RaftGroup.Raft.Term,
+			cb, //记录Callback
+		})
 	case raft_cmdpb.AdminCmdType_TransferLeader:
+		d.RaftGroup.TransferLeader(msg.AdminRequest.TransferLeader.Peer.Id)
+		cb.Done(&raft_cmdpb.RaftCmdResponse{
+			Header: &raft_cmdpb.RaftResponseHeader{},
+			AdminResponse: &raft_cmdpb.AdminResponse{
+				CmdType:        raft_cmdpb.AdminCmdType_TransferLeader,
+				TransferLeader: &raft_cmdpb.TransferLeaderResponse{},
+			},
+		})
 	case raft_cmdpb.AdminCmdType_Split:
 	}
 }

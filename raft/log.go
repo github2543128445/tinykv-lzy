@@ -108,8 +108,6 @@ func (l *RaftLog) allEntries() []pb.Entry {
 	// Your Code Here (2A).
 	return l.entries
 }
-
-// my func get [l,r]
 func (l *RaftLog) AddEntries(es []*pb.Entry) uint64 {
 	for _, i := range es {
 		l.entries = append(l.entries, *i)
@@ -118,12 +116,13 @@ func (l *RaftLog) AddEntries(es []*pb.Entry) uint64 {
 }
 
 // 输入为绝对Index，转化为相对Index后返回数据
+// my func get [l,r]
 func (l *RaftLog) GetEntries(left uint64, right uint64) []pb.Entry {
 	if right > l.LastIndex() {
 		right = l.LastIndex()
 	}
 	if left > right {
-		return []pb.Entry{} //mayBUG
+		return []pb.Entry{}
 	}
 	start, end := left-l.dummyIndex, right-l.dummyIndex
 	return l.entries[start : end+1]
@@ -162,7 +161,7 @@ func (l *RaftLog) LastTerm() uint64 {
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) { //有可能是快照中的， 待快照的，其他的
 	// Your Code Here (2A).
-	if i > l.LastIndex() { //超区，不存在0的term，应该在外面就能检测出冲突来了MAYBUG
+	if i > l.LastIndex() {
 		return 0, nil
 	}
 	if i >= l.dummyIndex { //就在Entries
@@ -177,6 +176,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) { //有可能是快照中的，
 }
 
 func (l *RaftLog) DeleteFrom(i uint64) {
+	// MayBug  i < l.dummyIndex 或许应该全删除？
 	if i < l.dummyIndex || len(l.entries) <= 0 || i > l.LastIndex() {
 		return
 	}

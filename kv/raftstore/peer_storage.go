@@ -400,7 +400,6 @@ func (ps *PeerStorage) SaveReadyState(ready *raft.Ready) (*ApplySnapResult, erro
 		kvWB.MustWriteToDB(ps.Engines.Kv)
 	}
 	//about snapshot
-	//MayBUG为什么不在这里写RaftApplyState、RegionLocalState
 	err = ps.Append(ready.Entries, raftWB) //保存entry,修改部分raftLocalState
 	if err != nil {
 		log.Panic(err)

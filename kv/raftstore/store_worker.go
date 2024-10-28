@@ -94,9 +94,9 @@ func (d *storeWorker) start(store *metapb.Store) {
 	d.ticker.scheduleStore(StoreTickSnapGC)
 }
 
-/// Checks if the message is targeting a stale peer.
-///
-/// Returns true means the message can be dropped silently.
+// / Checks if the message is targeting a stale peer.
+// /
+// / Returns true means the message can be dropped silently.
 func (d *storeWorker) checkMsg(msg *rspb.RaftMessage) (bool, error) {
 	regionID := msg.GetRegionId()
 	fromEpoch := msg.GetRegionEpoch()
@@ -188,13 +188,17 @@ func (d *storeWorker) onRaftMessage(msg *rspb.RaftMessage) error {
 	return nil
 }
 
-/// If target peer doesn't exist, create it.
-///
-/// return false to indicate that target peer is in invalid state or
-/// doesn't exist and can't be created.
+// / If target peer doesn't exist, create it.
+// /
+// / return false to indicate that target peer is in invalid state or
+// / doesn't exist and can't be created.
+// / 如果目标对等节点不存在，则创建它。
+// / 返回 false 表示目标对等节点处于无效状态或不存在且无法创建。
 func (d *storeWorker) maybeCreatePeer(regionID uint64, msg *rspb.RaftMessage) (bool, error) {
 	// we may encounter a message with larger peer id, which means
 	// current peer is stale, then we should remove current peer
+	// 我们可能会遇到具有更大对等节点 ID 的消息，这意味着
+	// 当前对等节点已过时，那么我们应该删除当前对等节点
 	meta := d.ctx.storeMeta
 	meta.Lock()
 	defer meta.Unlock()
@@ -224,6 +228,7 @@ func (d *storeWorker) maybeCreatePeer(regionID uint64, msg *rspb.RaftMessage) (b
 	}
 	// following snapshot may overlap, should insert into regionRanges after
 	// snapshot is applied.
+	// 后续快照可能会重叠，应在快照应用后插入到 regionRanges 中。
 	meta.regions[regionID] = peer.Region()
 	d.ctx.router.register(peer)
 	_ = d.ctx.router.send(regionID, message.Msg{Type: message.MsgTypeStart})

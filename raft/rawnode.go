@@ -193,7 +193,6 @@ func (rn *RawNode) Ready() Ready {
 			Commit: rn.Raft.RaftLog.committed,
 		}
 	}
-	//TODO next project about snapshot
 	if !IsEmptySnap(rn.Raft.RaftLog.pendingSnapshot) {
 		rd.Snapshot = *rn.Raft.RaftLog.pendingSnapshot
 	}
@@ -230,8 +229,6 @@ func (rn *RawNode) Advance(rd Ready) {
 	rn.Raft.msgs = nil
 	rn.Raft.RaftLog.maybeCompact()
 	rn.Raft.RaftLog.pendingSnapshot = nil
-	//TODO about snapshot
-
 }
 
 // GetProgress return the Progress of this node and its peers, if this

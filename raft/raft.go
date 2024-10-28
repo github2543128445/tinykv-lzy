@@ -224,7 +224,7 @@ func (l *RaftLog) FirstIndex() uint64 {
 // current commit index to the given peer. Returns true if a message was sent.
 // sendAppend 向给定的对等节点发送一个带有新条目（如果有）和当前提交索引的追加 RPC。如果发送了消息则返回 true。
 func (r *Raft) sendAppend(to uint64) bool {
-	//MayBUG 有时出现如下字段：
+	//MayProblem 有时出现如下字段：
 	// 	RUN   TestSnapshotUnreliableRecoverConcurrentPartition2C
 	// 2024/10/24 19:42:35 levels.go:823: [warning] STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: 2562047h47m16.854775807s
 	// 2024/10/24 19:42:35 levels.go:846: [warning] Waiting to add level 0 table. Compaction priorities: [{level:0 score:2}]
@@ -274,7 +274,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 			Snapshot: &snapshot,
 		})
 		return true //是true还是false根本无所谓，因为没人用返回值
-		//r.Prs[to].Next = snapshot.Metadata.Index + 1 MayBUG 收到snap的节点会发回AppendResponse，leader在那里会更新的
+		//r.Prs[to].Next = snapshot.Metadata.Index + 1 MayProblem收到snap的节点会发回AppendResponse，leader在那里会更新的
 	}
 }
 
@@ -326,7 +326,7 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.Lead = lead
 	r.electionElapsed = 0
 	r.heartbeatElapsed = 0
-	r.resetRandElectionTimeout() //mayBUG
+	r.resetRandElectionTimeout()
 	r.leadTransferee = None
 	r.Vote = None
 	r.votes = make(map[uint64]bool)
@@ -340,7 +340,9 @@ func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.Term++
 	r.Vote = r.id
+	r.votes = make(map[uint64]bool)
 	r.votes[r.id] = true
+	r.leadTransferee = None
 	r.electionElapsed = 0
 	r.resetRandElectionTimeout()
 	r.agreedCnt = 1
@@ -351,14 +353,11 @@ func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	r.State = StateLeader
 	r.Lead = r.id
+	r.leadTransferee = None
 	for id := range r.Prs {
 		r.Prs[id].Next = r.RaftLog.LastIndex() + 1
 		r.Prs[id].Match = 0 //之后要操作
 	}
-	// r.agreedCnt = 0
-	// r.Vote = None
-	// r.votes = make(map[uint64]bool)
-	//mayBUG我认为不用管，因为leader不会直接变Candidate，只要经过Follower就会更新
 	r.Step(pb.Message{MsgType: pb.MessageType_MsgPropose, To: r.id, From: r.id, Entries: []*pb.Entry{{}}})
 	// NOTE: Leader should propose a noop entry on its term
 }
@@ -370,22 +369,23 @@ func (r *Raft) leaderStep(m pb.Message) error {
 	case pb.MessageType_MsgPropose:
 		return r.stepMsgPropose(m)
 	case pb.MessageType_MsgAppend:
-		return r.stepMsgAppend(m) //mayBUG领导也要管别人的entry吗
+		if r.leadTransferee != None { //MayBUG 领导转让期间拒绝新添加entry
+			return nil
+		} else {
+			return r.stepMsgAppend(m) //上层向领导直接step（append）
+		}
 	case pb.MessageType_MsgAppendResponse:
-		return r.stepMsgAppendResponse(m) //mayBUG可以顶下领导，为什么不用心跳做？
+		return r.stepMsgAppendResponse(m)
 	case pb.MessageType_MsgRequestVote:
 		return r.stepMsgRequestVote(m)
 	case pb.MessageType_MsgRequestVoteResponse:
-	case pb.MessageType_MsgSnapshot:
-		//TODOnextProject
-		//Leader不需要？
+	case pb.MessageType_MsgSnapshot: //leader向follower发Snapshot的情况
 	case pb.MessageType_MsgHeartbeat:
-		//mayBUG领导万一能听到别人的心跳呢
 	case pb.MessageType_MsgHeartbeatResponse:
 		return r.stepMsgHeartbeatResponse(m)
 	case pb.MessageType_MsgTransferLeader:
-
-	case pb.MessageType_MsgTimeoutNow:
+		return r.stepMsgTransferLeader(m)
+	case pb.MessageType_MsgTimeoutNow: //MayBUG leader应该不会收到吧
 
 	}
 	return nil
@@ -408,10 +408,13 @@ func (r *Raft) candidateStep(m pb.Message) error {
 	case pb.MessageType_MsgHeartbeat:
 		return r.stepMsgHeartbeat(m)
 	case pb.MessageType_MsgHeartbeatResponse:
-	case pb.MessageType_MsgTransferLeader:
-
+	case pb.MessageType_MsgTransferLeader: //我不是领导，转发给领导
+		if r.Lead != None {
+			m.To = r.Lead
+			r.msgs = append(r.msgs, m)
+		}
 	case pb.MessageType_MsgTimeoutNow:
-
+		return r.stepMsgTimeoutNow(m)
 	}
 	return nil
 }
@@ -434,8 +437,12 @@ func (r *Raft) followerStep(m pb.Message) error {
 	case pb.MessageType_MsgHeartbeatResponse:
 
 	case pb.MessageType_MsgTransferLeader:
-
+		if r.Lead != None {
+			m.To = r.Lead
+			r.msgs = append(r.msgs, m)
+		}
 	case pb.MessageType_MsgTimeoutNow:
+		return r.stepMsgTimeoutNow(m)
 
 	}
 	return nil
@@ -494,6 +501,7 @@ func (r *Raft) stepMsgPropose(m pb.Message) error {
 	return nil
 }
 func (r *Raft) stepMsgAppend(m pb.Message) error {
+
 	r.handleAppendEntries(m)
 	return nil
 }
@@ -514,11 +522,14 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 					if id == r.id {
 						continue
 					}
-					r.sendAppend(id)
+					r.sendAppend(id) //用心跳应该不太行
+					//使用r.RL.commited = min(r.RL.lastIndex(),m.commited)可能存在当前节点有一堆非本leader的entry，甚至比commit要早，更新后就忽略了commit前的冲突
 				}
 			}
 		}
-		//3A TODO
+		if r.leadTransferee == m.From && r.RaftLog.LastIndex() == r.Prs[m.From].Match {
+			r.sendMsgTimeoutNow(m.From) //补全了日志就可以开始选举了
+		}
 		return nil
 	}
 }
@@ -579,7 +590,7 @@ func (r *Raft) stepMsgHeartbeatResponse(m pb.Message) error {
 	if m.Term > r.Term {
 		r.becomeFollower(m.Term, m.From)
 	} else {
-		if r.Prs[m.From].Match < r.RaftLog.LastIndex() { //MayBUG
+		if r.Prs[m.From].Match < r.RaftLog.LastIndex() {
 			r.sendAppend(m.From)
 		}
 	}
@@ -587,12 +598,33 @@ func (r *Raft) stepMsgHeartbeatResponse(m pb.Message) error {
 
 }
 func (r *Raft) stepMsgTransferLeader(m pb.Message) error {
-	//TODO nextProject
+	if _, ok := r.Prs[m.From]; !ok {
+		return nil
+	}
+	if r.id == m.From || r.leadTransferee == m.From { //我和目标是同一人 || 相同的事已经办过了
+		return nil
+	}
+	r.leadTransferee = m.From //这个状态实际上是标记当前在“准备”Transfer,
+	//不用主动清理，对象开启选举后，任期增加，当前leader一定被顶掉，becomeFollower就清理了
+	if r.Prs[m.From].Match == r.RaftLog.LastIndex() { //已有最新日志
+		r.sendMsgTimeoutNow(m.From)
+	} else {
+		r.sendAppend(m.From)
+	}
+
 	return nil
 }
 func (r *Raft) stepMsgTimeoutNow(m pb.Message) error {
-	//TODO nextProject
+	r.electionElapsed = 0
+	r.Step(pb.Message{MsgType: pb.MessageType_MsgHup, To: r.id, From: r.id})
 	return nil
+}
+func (r *Raft) sendMsgTimeoutNow(to uint64) {
+	r.msgs = append(r.msgs, pb.Message{
+		To:      to,
+		From:    r.id,
+		MsgType: pb.MessageType_MsgTimeoutNow,
+	})
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -661,7 +693,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			baseIndex := m.Index + 1
 			var i uint64 = 0
 			//检查前面有没有冲突
-			for ; baseIndex+i <= r.RaftLog.LastIndex() && baseIndex+i <= m.Entries[len(m.Entries)-1].Index; i++ { // < mayBUG
+			for ; baseIndex+i <= r.RaftLog.LastIndex() && baseIndex+i <= m.Entries[len(m.Entries)-1].Index; i++ {
 				term, _ := r.RaftLog.Term(baseIndex + i)
 				if term != m.Entries[i].Term {
 					break
@@ -712,7 +744,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 		Reject:  true,
 	}
 	if m.Term >= r.Term {
-		if r.RaftLog.committed >= m.Snapshot.Metadata.Index { //MayBUG Snapshot里的Index是last，拿commited比的意义是什么呢
+		if r.RaftLog.committed >= m.Snapshot.Metadata.Index {
 			resp.Index = r.RaftLog.committed
 		} else {
 			resp.Reject = false
@@ -743,11 +775,27 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 // addNode add a new node to raft group
 func (r *Raft) addNode(id uint64) {
 	// Your Code Here (3A).
+	if _, ok := r.Prs[id]; !ok { //不存在才加
+		r.Prs[id] = &Progress{Next: r.RaftLog.LastIndex() + 1, Match: 0}
+	}
+	//r.PendingConfIndex = None
 }
 
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+	if _, ok := r.Prs[id]; ok {
+		delete(r.Prs, id)
+		if r.State == StateLeader && r.checkCommit() {
+			for id := range r.Prs { //广播commit的更新
+				if id == r.id {
+					continue
+				}
+				r.sendAppend(id)
+			}
+		}
+	}
+	//r.PendingConfIndex = None
 }
 
 // 该函数同时帮助更新Next和Match，返回值代表是否为有效更新
