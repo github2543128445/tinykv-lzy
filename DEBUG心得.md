@@ -16,4 +16,5 @@
 - 日志压缩是日志压缩，由上层Handle决定的，是AdminRequest，在Entry Apply时，通过processAdminRequest处理。日志压缩并不生成快照，它只是将超过数量阈值，并已经写入DB的Entry直接删除
 
 
-### 
+### Project3B
+- 有关Region的操作都要记得检查是否为本区域以及版本号

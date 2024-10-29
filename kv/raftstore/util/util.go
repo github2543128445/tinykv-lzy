@@ -78,7 +78,7 @@ func IsFirstVoteMessage(msg *eraftpb.Message) bool {
 	return IsVoteMessage(msg) && msg.Term == meta.RaftInitLogTerm+1
 }
 
-// 验证传入req 中的 RegionEpoch 是否与当前存储在 TiKV 中的 Region 的 RegionEpoch 一致。
+// 验证传入req 中的 RegionEpoch 是否与当前存储在 TiKV 中的 Region 的 RegionEpoch 一致。includeRegion是否将reigon信息包含在错误信息中
 func CheckRegionEpoch(req *raft_cmdpb.RaftCmdRequest, region *metapb.Region, includeRegion bool) error {
 	checkVer, checkConfVer := false, false
 	if req.AdminRequest == nil {
