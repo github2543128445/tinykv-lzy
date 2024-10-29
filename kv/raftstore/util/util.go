@@ -16,11 +16,12 @@ import (
 const RaftInvalidIndex uint64 = 0
 const InvalidID uint64 = 0
 
-/// `is_initial_msg` checks whether the `msg` can be used to initialize a new peer or not.
+// / `is_initial_msg` checks whether the `msg` can be used to initialize a new peer or not.
 // There could be two cases:
-// 1. Target peer already exists but has not established communication with leader yet
-// 2. Target peer is added newly due to member change or region split, but it's not
-//    created yet
+//  1. Target peer already exists but has not established communication with leader yet
+//  2. Target peer is added newly due to member change or region split, but it's not
+//     created yet
+//
 // For both cases the region start key and end key are attached in RequestVote and
 // Heartbeat message for the store of that peer to check whether to create a new peer
 // when receiving these messages, or just to wait for a pending region split to perform
@@ -31,7 +32,7 @@ func IsInitialMsg(msg *eraftpb.Message) bool {
 		(msg.MsgType == eraftpb.MessageType_MsgHeartbeat && msg.Commit == RaftInvalidIndex)
 }
 
-/// Check if key in region range [`start_key`, `end_key`).
+// / Check if key in region range [`start_key`, `end_key`).
 func CheckKeyInRegion(key []byte, region *metapb.Region) error {
 	if bytes.Compare(key, region.StartKey) >= 0 && (len(region.EndKey) == 0 || bytes.Compare(key, region.EndKey) < 0) {
 		return nil
@@ -40,7 +41,7 @@ func CheckKeyInRegion(key []byte, region *metapb.Region) error {
 	}
 }
 
-/// Check if key in region range (`start_key`, `end_key`).
+// / Check if key in region range (`start_key`, `end_key`).
 func CheckKeyInRegionExclusive(key []byte, region *metapb.Region) error {
 	if bytes.Compare(region.StartKey, key) < 0 && (len(region.EndKey) == 0 || bytes.Compare(key, region.EndKey) < 0) {
 		return nil
@@ -49,7 +50,7 @@ func CheckKeyInRegionExclusive(key []byte, region *metapb.Region) error {
 	}
 }
 
-/// Check if key in region range [`start_key`, `end_key`].
+// / Check if key in region range [`start_key`, `end_key`].
 func CheckKeyInRegionInclusive(key []byte, region *metapb.Region) error {
 	if bytes.Compare(key, region.StartKey) >= 0 && (len(region.EndKey) == 0 || bytes.Compare(key, region.EndKey) <= 0) {
 		return nil
@@ -58,7 +59,8 @@ func CheckKeyInRegionInclusive(key []byte, region *metapb.Region) error {
 	}
 }
 
-/// check whether epoch is staler than check_epoch.
+// / check whether epoch is staler than check_epoch.
+// / 检查epoch是否比 check_epoch 更旧。
 func IsEpochStale(epoch *metapb.RegionEpoch, checkEpoch *metapb.RegionEpoch) bool {
 	return epoch.Version < checkEpoch.Version || epoch.ConfVer < checkEpoch.ConfVer
 }
@@ -68,14 +70,15 @@ func IsVoteMessage(msg *eraftpb.Message) bool {
 	return tp == eraftpb.MessageType_MsgRequestVote
 }
 
-/// `is_first_vote_msg` checks `msg` is the first vote message or not. It's used for
-/// when the message is received but there is no such region in `Store::region_peers` and the
-/// region overlaps with others. In this case we should put `msg` into `pending_votes` instead of
-/// create the peer.
+// / `is_first_vote_msg` checks `msg` is the first vote message or not. It's used for
+// / when the message is received but there is no such region in `Store::region_peers` and the
+// / region overlaps with others. In this case we should put `msg` into `pending_votes` instead of
+// / create the peer.
 func IsFirstVoteMessage(msg *eraftpb.Message) bool {
 	return IsVoteMessage(msg) && msg.Term == meta.RaftInitLogTerm+1
 }
 
+// 验证传入req 中的 RegionEpoch 是否与当前存储在 TiKV 中的 Region 的 RegionEpoch 一致。
 func CheckRegionEpoch(req *raft_cmdpb.RaftCmdRequest, region *metapb.Region, includeRegion bool) error {
 	checkVer, checkConfVer := false, false
 	if req.AdminRequest == nil {
@@ -115,6 +118,11 @@ func CheckRegionEpoch(req *raft_cmdpb.RaftCmdRequest, region *metapb.Region, inc
 	// request is higher than TiKV B, the request must be denied due to epoch
 	// not match, so it does not read on a stale snapshot, thus avoid the
 	// KeyNotInRegion error.
+	// 我们必须严格检查epoch以避免出现键不在区域的错误。
+	// 一个启用了合并的 3 节点 TiKV 集群，在提交合并后，TiKV A
+	// 向 TiDB 报告一个包含最新目标区域信息的epoch不匹配错误，TiDB 更新其区域缓存并向 TiKV B 发送请求，
+	// 而 TiKV B 尚未应用提交合并，由于请求中的区域epoch高于 TiKV B，由于epoch不匹配，请求必须被拒绝，
+	// 因此它不会读取过时的快照，从而避免了键不在区域的错误。
 	if (checkConfVer && fromEpoch.ConfVer != currentEpoch.ConfVer) ||
 		(checkVer && fromEpoch.Version != currentEpoch.Version) {
 		log.Debugf("epoch not match, region id %v, from epoch %v, current epoch %v",

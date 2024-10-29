@@ -124,6 +124,9 @@ func (l *RaftLog) GetEntries(left uint64, right uint64) []pb.Entry {
 	if left > right {
 		return []pb.Entry{}
 	}
+	if left < l.dummyIndex {
+		left = l.dummyIndex
+	}
 	start, end := left-l.dummyIndex, right-l.dummyIndex
 	return l.entries[start : end+1]
 
