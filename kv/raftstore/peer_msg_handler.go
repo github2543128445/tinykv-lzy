@@ -142,15 +142,16 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 		fromEpoch := msg.GetHeader().GetRegionEpoch()
 		if fromEpoch != nil {
 			if util.IsEpochStale(fromEpoch, thisRegion.RegionEpoch) {
-				resp := ErrResp(&util.ErrEpochNotMatch{})
-				d.handleProposal(entry, resp) //MayBUG
+				d.handleProposal(entry, ErrResp(&util.ErrEpochNotMatch{}))
 				return kvWB
 			}
 		}
+
 	}
 	req := msg.AdminRequest.ChangePeer
 	switch cc.ChangeType {
 	case eraftpb.ConfChangeType_AddNode:
+		log.Infof("[region %d], try to apply addnode %d", d.regionId, cc.NodeId)
 		if d.searchPeer(cc.NodeId) == len(thisRegion.Peers) {
 			storeMeta := d.ctx.storeMeta
 			storeMeta.Lock()
@@ -163,11 +164,13 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 			// 更新 metaStore 中的 region 信息
 			storeMeta.regions[thisRegion.Id] = thisRegion
 			storeMeta.Unlock()
-
+		} else {
+			return kvWB
 		}
 	case eraftpb.ConfChangeType_RemoveNode:
+		log.Infof("[region %d], try to apply removenode %d", d.regionId, cc.NodeId)
 		if cc.NodeId == d.PeerId() {
-			d.destroyPeer()
+			d.startToDestroyPeer()
 			return kvWB
 		}
 		NodeI := d.searchPeer(cc.NodeId)
@@ -182,6 +185,8 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 
 			storeMeta.regions[thisRegion.Id] = thisRegion
 			storeMeta.Unlock()
+		} else {
+			return kvWB
 		}
 
 	}
@@ -194,11 +199,35 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 			ChangePeer: &raft_cmdpb.ChangePeerResponse{},
 		},
 	}
-	d.handleProposal(entry, resp) //MayBUG
+	d.handleProposal(entry, resp)
 	d.notifyHeartbeatScheduler(d.Region(), d.peer)
 	return kvWB
 }
+func (d *peerMsgHandler) startToDestroyPeer() {
+	if len(d.Region().Peers) == 2 && d.IsLeader() {
+		var targetPeer uint64 = 0
+		for _, peer := range d.Region().Peers {
+			if peer.Id != d.PeerId() {
+				targetPeer = peer.Id
+				break
+			}
+		}
+		if targetPeer == 0 {
+			panic("This should not happen")
+		}
 
+		m := []pb.Message{{
+			To:      targetPeer,
+			MsgType: pb.MessageType_MsgHeartbeat,
+			Commit:  d.peerStorage.raftState.HardState.Commit,
+		}}
+		for i := 0; i < 10; i++ {
+			d.Send(d.ctx.trans, m)
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	d.destroyPeer()
+}
 func (d *peerMsgHandler) notifyHeartbeatScheduler(region *metapb.Region, peer *peer) {
 	clonedRegion := new(metapb.Region)
 	err := util.CloneMsg(region, clonedRegion)
@@ -292,6 +321,7 @@ func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdp
 	case raft_cmdpb.AdminCmdType_ChangePeer: //ChangeConf 不在这里处理
 	case raft_cmdpb.AdminCmdType_Split:
 		splitReq := request.AdminRequest.Split
+		log.Infof("[region %d] try to apply Split in key %s, new region id %d", d.regionId, splitReq.SplitKey, splitReq.NewRegionId)
 		if request.Header.RegionId != d.regionId { //非本region
 			d.handleProposal(entry, ErrResp(&util.ErrRegionNotFound{RegionId: request.Header.RegionId}))
 			return kvWB
@@ -328,6 +358,7 @@ func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdp
 			},
 			Peers: newPeersForMeta,
 		}
+		log.Infof("want new peer id:%v", splitReq.NewPeerIds)
 		//更新元数据
 		d.ctx.storeMeta.Lock()
 		d.Region().RegionEpoch.Version++
@@ -505,11 +536,37 @@ func (d *peerMsgHandler) proposeAdminRequest(msg *raft_cmdpb.RaftCmdRequest, cb 
 		if err != nil {
 			log.Panic(err)
 		}
+		// if msg.AdminRequest.ChangePeer.ChangeType == eraftpb.ConfChangeType_RemoveNode &&
+		// 	msg.AdminRequest.ChangePeer.Peer.Id == d.PeerId() && len(d.Region().Peers) == 2 && d.IsLeader() { //MayBUG 仅剩2节点，leader还要删除自己
+		// 	log.Infof("[region %d] only left two node, try to delete leader %d", d.regionId, d.LeaderId())
+		// 	for _, p := range d.Region().Peers {
+		// 		if p.Id != d.LeaderId() {
+		// 			log.Infof("[region %d] Node %d try to transfer leader to %d", d.regionId, d.PeerId(), p.Id)
+		// 			d.RaftGroup.TransferLeader(p.Id) //先转让给另一节点再说
+		// 			break
+		// 		}
+		// 	}
+		// 	return
+		// }
+
+		if msg.AdminRequest.ChangePeer.ChangeType == eraftpb.ConfChangeType_RemoveNode &&
+			msg.AdminRequest.ChangePeer.Peer.Id == d.PeerId() && d.IsLeader() { //leader要删除自己，无论剩几个节点，都给别人，增加安全性
+			log.Infof("[region %d] try to delete leader %d", d.regionId, d.LeaderId())
+			for _, p := range d.Region().Peers {
+				if p.Id != d.LeaderId() {
+					log.Infof("[region %d] Node %d try to transfer leader to %d", d.regionId, d.PeerId(), p.Id)
+					d.RaftGroup.TransferLeader(p.Id) //先随便转让给另一节点再说
+					break
+				}
+			}
+			return
+		}
 		CC := eraftpb.ConfChange{
 			ChangeType: msg.AdminRequest.ChangePeer.ChangeType,
 			NodeId:     msg.AdminRequest.ChangePeer.Peer.Id,
 			Context:    data,
 		}
+
 		err = d.RaftGroup.ProposeConfChange(CC)
 		if err != nil {
 			cb.Done(ErrResp(&util.ErrStaleCommand{}))

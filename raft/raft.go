@@ -21,6 +21,7 @@ import (
 	"sort"
 
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
+	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -260,12 +261,15 @@ func (r *Raft) sendAppend(to uint64) bool {
 		var err error
 		if !IsEmptySnap(r.RaftLog.pendingSnapshot) {
 			snapshot = *r.RaftLog.pendingSnapshot // 挂起的还未处理的快照
+			log.Infof("node %d request Snapshot from %d ,success with pendingSnapshot", to, r.id)
 		} else {
-			snapshot, err = r.RaftLog.storage.Snapshot() // 生成一份快照
+			snapshot, err = r.RaftLog.storage.Snapshot() // 本节点生成一份快照
 			if err != nil {                              //还没准备好
+				log.Infof("node %d request Snapshot from %d ,but fail", to, r.id)
 				//异步执行，本次没准备好直接不管了，下次再说就是了
 				return false
 			}
+			log.Infof("node %d request Snapshot from %d ,success", to, r.id)
 		}
 		r.msgs = append(r.msgs, pb.Message{
 			MsgType:  pb.MessageType_MsgSnapshot,
@@ -348,6 +352,7 @@ func (r *Raft) becomeCandidate() {
 	r.electionElapsed = 0
 	r.resetRandElectionTimeout()
 	r.agreedCnt = 1
+	log.Infof("node %d becomeCandidate with Term %d, LastIndex%d,LastTerm%d", r.id, r.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm())
 }
 
 // becomeLeader transform this peer's state to leader
@@ -455,6 +460,7 @@ func (r *Raft) stepMsgHup(m pb.Message) error {
 	}
 	r.becomeCandidate()
 	if len(r.Prs) == 1 {
+		log.Infof("only 1 peer, node %d become Leader", r.id)
 		r.becomeLeader()
 		return nil
 	}
@@ -567,14 +573,17 @@ func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
 
 	} else {
 		if r.Term < m.Term {
+			log.Infof("node %d becomeLeader failed because of less Term %d < %d", r.id, r.Term, m.Term)
 			r.becomeFollower(m.Term, None)
 		}
 	}
 
 	if r.agreedCnt >= majority {
+		log.Infof("node %d becomeLeader, enough votes. now region has %d peer", r.id, len(r.Prs))
 		r.becomeLeader()
 	} else {
 		if len(r.votes)-r.agreedCnt >= majority {
+			log.Infof("node %d becomeLeader fail, unenough votes", r.id)
 			r.becomeFollower(r.Term, None)
 		}
 	}
@@ -609,8 +618,10 @@ func (r *Raft) stepMsgTransferLeader(m pb.Message) error {
 	r.leadTransferee = m.From //这个状态实际上是标记当前在“准备”Transfer,
 	//不用主动清理，对象开启选举后，任期增加，当前leader一定被顶掉，becomeFollower就清理了
 	if r.Prs[m.From].Match == r.RaftLog.LastIndex() { //已有最新日志
+		log.Infof("leader %d trans to node %d, sendTimeoutNow", r.id, m.From)
 		r.sendMsgTimeoutNow(m.From)
 	} else {
+		log.Infof("leader %d want to trans to node %d, update destination's entries", r.id, m.From)
 		r.sendAppend(m.From)
 	}
 

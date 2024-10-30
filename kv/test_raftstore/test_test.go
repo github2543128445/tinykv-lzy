@@ -29,6 +29,7 @@ func runClient(t *testing.T, me int, ca chan bool, fn func(me int, t *testing.T)
 }
 
 // spawn ncli clients and wait until they are all done
+
 func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t *testing.T)) {
 	defer func() { ch <- true }()
 	ca := make([]chan bool, ncli)
@@ -48,6 +49,7 @@ func SpawnClientsAndWait(t *testing.T, ch chan bool, ncli int, fn func(me int, t
 }
 
 // predict effect of Append(k, val) if old value is prev.
+// 预测如果旧值为 prev 时 Append (k, val) 的效果。
 func NextValue(prev string, val string) string {
 	return prev + val
 }
@@ -204,7 +206,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		// log.Printf("Iteration %v\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
-		go SpawnClientsAndWait(t, ch_clients, nclients, func(cli int, t *testing.T) {
+		go SpawnClientsAndWait(t, ch_clients, nclients, func(cli int, t *testing.T) { //并发执行
 			j := 0
 			defer func() {
 				clnts[cli] <- j
@@ -212,19 +214,19 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			last := ""
 			for atomic.LoadInt32(&done_clients) == 0 {
 				if (rand.Int() % 1000) < 500 {
-					key := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
-					value := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-					// log.Infof("%d: client new put %v,%v\n", cli, key, value)
-					cluster.MustPut([]byte(key), []byte(value))
-					last = NextValue(last, value)
+					key := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)          //key是client_id+ +8位字符串化的j
+					value := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y" //value是x client_id j y
+					//log.Infof("%d: client new put %v,%v\n", cli, key, value)
+					cluster.MustPut([]byte(key), []byte(value)) //写入
+					last = NextValue(last, value)               // last是有史以来所有val的链接
 					j++
 				} else {
-					start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0)
-					end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)
-					// log.Infof("%d: client new scan %v-%v\n", cli, start, end)
+					start := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", 0) //start : client_id+' '+00000000
+					end := strconv.Itoa(cli) + " " + fmt.Sprintf("%08d", j)   //end : client_id+' '+8位j
+					//log.Infof("%d: client new scan %v-%v\n", cli, start, end)
 					values := cluster.Scan([]byte(start), []byte(end))
-					v := string(bytes.Join(values, []byte("")))
-					if v != last {
+					v := string(bytes.Join(values, []byte(""))) //"x 1 00000001 yx 1 00000002 yx 1 00000003 y"
+					if v != last {                              //不等于所有val就wrong
 						log.Fatalf("get wrong value, client %v\nwant:%v\ngot: %v\n", cli, last, v)
 					}
 				}
@@ -252,6 +254,8 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			// have submitted a request in a minority.  That request
 			// won't return until that server discovers a new term
 			// has started.
+			// 重新连接网络并提交请求。客户端可能已经在少数派中提交了请求。
+			// 该请求在该服务器发现新任期已开始之前不会返回
 			cluster.ClearFilters()
 			// wait for a while so that we have a new term
 			time.Sleep(electionTimeout)
