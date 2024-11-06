@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"github.com/pingcap-incubator/tinykv/log"
@@ -239,6 +240,9 @@ func (r *Raft) sendAppend(to uint64) bool {
 	prevLogIndex := toPg.Next - 1 //不要使用match来赋值
 	prevLogTerm, err := r.RaftLog.Term(prevLogIndex)
 	if err == nil && prevLogIndex+1 >= r.RaftLog.dummyIndex {
+		if len(r.Prs) == 2 {
+			log.Infof("leader %d send entry[%d,%d] to node %d", r.id, prevLogIndex+1, r.RaftLog.LastIndex(), to)
+		}
 		appendMsg := pb.Message{
 			MsgType: pb.MessageType_MsgAppend,
 			To:      to,
@@ -257,19 +261,20 @@ func (r *Raft) sendAppend(to uint64) bool {
 		//做好发送准备即可
 		return true
 	} else { //在快照中
+		log.Infof("leader %d has entry[%d,%d], node %d need entry from %d", r.id, r.RaftLog.dummyIndex, r.RaftLog.LastIndex(), to, prevLogIndex+1)
 		var snapshot pb.Snapshot
 		var err error
 		if !IsEmptySnap(r.RaftLog.pendingSnapshot) {
 			snapshot = *r.RaftLog.pendingSnapshot // 挂起的还未处理的快照
-			log.Infof("node %d request Snapshot from %d ,success with pendingSnapshot", to, r.id)
+			log.Infof("node %d try to send Snapshot to %d ,success with pendingSnapshot", r.id, to)
 		} else {
 			snapshot, err = r.RaftLog.storage.Snapshot() // 本节点生成一份快照
 			if err != nil {                              //还没准备好
-				log.Infof("node %d request Snapshot from %d ,but fail", to, r.id)
+				log.Infof("node %d try to send Snapshot to %d ,but fail", r.id, to)
 				//异步执行，本次没准备好直接不管了，下次再说就是了
 				return false
 			}
-			log.Infof("node %d request Snapshot from %d ,success", to, r.id)
+			log.Infof("node %d try to send Snapshot to %d ,success, snapshot index%d,term%d, leader index%d,term%d", r.id, to, snapshot.Metadata.Index, snapshot.Metadata.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm())
 		}
 		r.msgs = append(r.msgs, pb.Message{
 			MsgType:  pb.MessageType_MsgSnapshot,
@@ -387,6 +392,7 @@ func (r *Raft) leaderStep(m pb.Message) error {
 		return r.stepMsgRequestVote(m)
 	case pb.MessageType_MsgRequestVoteResponse:
 	case pb.MessageType_MsgSnapshot: //leader向follower发Snapshot的情况
+		return r.stepMsgSnapshot(m)
 	case pb.MessageType_MsgHeartbeat:
 	case pb.MessageType_MsgHeartbeatResponse:
 		return r.stepMsgHeartbeatResponse(m)
@@ -493,6 +499,9 @@ func (r *Raft) stepMsgBeat(m pb.Message) error {
 	return nil
 }
 func (r *Raft) stepMsgPropose(m pb.Message) error {
+	if r.leadTransferee != None {
+		return nil
+	}
 	r.appendEntries(m.Entries)
 	r.Prs[r.id].Match = r.RaftLog.LastIndex()
 	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
@@ -518,8 +527,8 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 		if m.Term > r.Term {
 			r.becomeFollower(m.Term, None)
 		} else {
-			r.Prs[m.From].Next = min(m.Index+1, r.Prs[m.From].Next-1)
-			//未成功，不修改match
+			r.Prs[m.From].Match = m.Index
+			r.Prs[m.From].Next = m.Index + 1
 			r.sendAppend(m.From)
 		}
 		return nil
@@ -535,8 +544,12 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 				}
 			}
 		}
-		if r.leadTransferee == m.From && r.RaftLog.LastIndex() == r.Prs[m.From].Match {
-			r.sendMsgTimeoutNow(m.From) //补全了日志就可以开始选举了
+		if r.leadTransferee == m.From {
+			if r.RaftLog.LastIndex() == r.Prs[m.From].Match {
+				r.sendMsgTimeoutNow(m.From) //补全了日志就可以开始选举了
+			} else {
+				log.Infof("leadTransferee: leader%d lastIndex%d,node%d match%d", r.id, r.RaftLog.LastIndex(), m.From, r.Prs[m.From].Match)
+			}
 		}
 		return nil
 	}
@@ -579,7 +592,11 @@ func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
 	}
 
 	if r.agreedCnt >= majority {
-		log.Infof("node %d becomeLeader, enough votes. now region has %d peer", r.id, len(r.Prs))
+		var s string
+		for i, _ := range r.Prs {
+			s = s + " " + strconv.Itoa(int(i))
+		}
+		log.Infof("node %d becomeLeader, enough votes. now region has %d peer[%s]", r.id, len(r.Prs), s)
 		r.becomeLeader()
 	} else {
 		if len(r.votes)-r.agreedCnt >= majority {
@@ -610,10 +627,16 @@ func (r *Raft) stepMsgHeartbeatResponse(m pb.Message) error {
 }
 func (r *Raft) stepMsgTransferLeader(m pb.Message) error {
 	if _, ok := r.Prs[m.From]; !ok {
+		log.Infof("leadTransferee: node %d not exist", m.From)
 		return nil
 	}
-	if r.id == m.From || r.leadTransferee == m.From { //我和目标是同一人 || 相同的事已经办过了
+	if r.id == m.From { //我和目标是同一人
+		log.Infof("[leadTransferee] node %d tried to itself", r.id)
 		return nil
+	}
+	if r.leadTransferee == m.From {
+		log.Infof("[leadTransferee] node %d already tried leadTransferee to node %d", r.id, m.From)
+		r.sendAppend(m.From) //因为在AppendResponse中处理转移，所以如果AppendResponse因为网络Miss了，leader永远不知道对方已经齐了
 	}
 	r.leadTransferee = m.From //这个状态实际上是标记当前在“准备”Transfer,
 	//不用主动清理，对象开启选举后，任期增加，当前leader一定被顶掉，becomeFollower就清理了
@@ -700,6 +723,9 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 				}
 			}
 		}
+		if len(r.Prs) == 2 {
+			log.Infof("node %d get leader %d but mismatch, want entry from %d", r.id, r.Lead, resp.Index+1)
+		}
 
 	} else {
 		if len(m.Entries) > 0 {
@@ -724,6 +750,10 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		resp.Reject = false
 		resp.Index = m.Index + uint64(len(m.Entries))
 		resp.LogTerm, _ = r.RaftLog.Term(resp.Index)
+		if len(r.Prs) == 2 {
+			log.Infof("node %d get leader %d entries,now last entry index%d", r.id, r.Lead, resp.Index+1)
+		}
+
 	}
 	r.msgs = append(r.msgs, resp)
 }
@@ -754,11 +784,14 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 		MsgType: pb.MessageType_MsgAppendResponse,
 		From:    r.id,
 		To:      m.From,
+		Index:   r.RaftLog.LastIndex(),
+		LogTerm: r.RaftLog.LastTerm(),
 		Reject:  true,
 	}
 	if m.Term >= r.Term {
 		if r.RaftLog.committed >= m.Snapshot.Metadata.Index {
 			resp.Index = r.RaftLog.committed
+			log.Infof("node %d get snapshot from node %d(leader %d).Rejected, Snapshot's Index %d,already commit %d", r.id, r.Lead, m.From, m.Snapshot.Metadata.Index, r.RaftLog.committed)
 		} else {
 			resp.Reject = false
 			r.becomeFollower(m.Term, m.From)
@@ -779,8 +812,10 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 				}
 			}
 			resp.Index = m.Snapshot.Metadata.Index
+			log.Infof("node %d get snapshot from node %d(leader %d).Accept, next Index %d", r.id, r.Lead, m.From, resp.Index+1)
 		}
 	}
+
 	r.msgs = append(r.msgs, resp)
 
 }

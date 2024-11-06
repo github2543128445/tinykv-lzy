@@ -188,6 +188,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 	for i := 0; i < 10 || time.Since(startTime) < timeout; i++ {
 		region := c.GetRegion(key)
 		regionID := region.GetId()
+		log.Infof("1 key %s request in region %d", key, regionID)
 		req := NewRequest(regionID, region.RegionEpoch, reqs)
 		resp, txn := c.CallCommandOnLeader(&req, timeout)
 		if resp == nil {
@@ -199,6 +200,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 			SleepMS(100)
 			continue
 		}
+		log.Infof("2 key %s request in region %d", key, regionID)
 		return resp, txn
 	}
 	panic("request timeout")
@@ -392,7 +394,6 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 			break
 		}
 	}
-
 	return values
 }
 

@@ -3,6 +3,7 @@ package raftstore
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/Connor1996/badger/y"
@@ -76,7 +77,7 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	if len(ready.CommittedEntries) > 0 {
 		kvWB := &engine_util.WriteBatch{}
 		for _, entry := range ready.CommittedEntries {
-			kvWB = d.processCommittedEntry(&entry, kvWB) //逐个取出Committed Entry，进行写入KVDB
+			kvWB = d.applyCommittedEntry(&entry, kvWB) //逐个取出Committed Entry，进行写入KVDB
 			if d.stopped {
 				return
 			}
@@ -92,13 +93,13 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	}
 	d.RaftGroup.Advance(ready)
 }
-func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+func (d *peerMsgHandler) applyCommittedEntry(entry *pb.Entry, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
 	if entry.EntryType == pb.EntryType_EntryConfChange {
 		cc := &pb.ConfChange{}
 		if err := cc.Unmarshal(entry.Data); err != nil {
 			log.Panic(err)
 		}
-		return d.processConfChange(entry, cc, kvWB)
+		return d.applyConfChange(entry, cc, kvWB)
 	}
 	req := &raft_cmdpb.RaftCmdRequest{}
 	err := req.Unmarshal(entry.Data) //从Data反序列化，获得真正的指令
@@ -118,9 +119,9 @@ func (d *peerMsgHandler) processCommittedEntry(entry *pb.Entry, kvWB *engine_uti
 		}
 	}
 	if req.AdminRequest == nil {
-		return d.processCommonRequest(entry, req, kvWB)
+		return d.applyCommonRequest(entry, req, kvWB)
 	} else {
-		return d.processAdminRequest(entry, req, kvWB) //about AdminRequest
+		return d.applyAdminRequest(entry, req, kvWB) //about AdminRequest
 	}
 
 }
@@ -132,7 +133,7 @@ func (d *peerMsgHandler) searchPeer(nodeId uint64) int {
 	}
 	return len(d.peerStorage.region.Peers)
 }
-func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
 	msg := &raft_cmdpb.RaftCmdRequest{}
 	if err := msg.Unmarshal(cc.Context); err != nil {
 		log.Panic(err)
@@ -170,7 +171,8 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 	case eraftpb.ConfChangeType_RemoveNode:
 		log.Infof("[region %d], try to apply removenode %d", d.regionId, cc.NodeId)
 		if cc.NodeId == d.PeerId() {
-			d.startToDestroyPeer()
+			d.destroyPeer()
+			//d.startToDestroyPeer()
 			return kvWB
 		}
 		NodeI := d.searchPeer(cc.NodeId)
@@ -192,6 +194,11 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 	}
 	//从Raft层应用配置
 	d.RaftGroup.ApplyConfChange(*cc)
+	var s string
+	for i, _ := range d.RaftGroup.Raft.Prs {
+		s = s + " " + strconv.Itoa(int(i))
+	}
+	log.Infof("region[%d],now has peerid:%s", d.regionId, s)
 	resp := &raft_cmdpb.RaftCmdResponse{
 		Header: &raft_cmdpb.RaftResponseHeader{},
 		AdminResponse: &raft_cmdpb.AdminResponse{
@@ -203,7 +210,7 @@ func (d *peerMsgHandler) processConfChange(entry *pb.Entry, cc *pb.ConfChange, k
 	d.notifyHeartbeatScheduler(d.Region(), d.peer)
 	return kvWB
 }
-func (d *peerMsgHandler) startToDestroyPeer() {
+func (d *peerMsgHandler) startToDestroyPeer() { //MayBUG必须
 	if len(d.Region().Peers) == 2 && d.IsLeader() {
 		var targetPeer uint64 = 0
 		for _, peer := range d.Region().Peers {
@@ -241,7 +248,7 @@ func (d *peerMsgHandler) notifyHeartbeatScheduler(region *metapb.Region, peer *p
 		ApproximateSize: peer.ApproximateSize,
 	}
 }
-func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
 	resp := &raft_cmdpb.RaftCmdResponse{
 		Header:    &raft_cmdpb.RaftResponseHeader{},
 		Responses: []*raft_cmdpb.Response{},
@@ -309,7 +316,7 @@ func (d *peerMsgHandler) processCommonRequest(entry *pb.Entry, request *raft_cmd
 	return kvWB
 
 }
-func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
+func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.RaftCmdRequest, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
 	switch request.AdminRequest.CmdType {
 	case raft_cmdpb.AdminCmdType_CompactLog:
 		if request.AdminRequest.CompactLog.CompactIndex > d.peerStorage.applyState.TruncatedState.Index {
@@ -397,7 +404,8 @@ func (d *peerMsgHandler) processAdminRequest(entry *pb.Entry, request *raft_cmdp
 				},
 			},
 		})
-
+		log.Infof("old region %d become [%s,%s]", d.regionId, d.Region().StartKey, d.Region().EndKey)
+		log.Infof("new region %d has [%s,%s]", newRegion.Id, newRegion.StartKey, newRegion.EndKey)
 		d.notifyHeartbeatScheduler(d.Region(), d.peer)
 		d.notifyHeartbeatScheduler(newRegion, newPeer)
 	}
@@ -438,7 +446,7 @@ func (d *peerMsgHandler) HandleMsg(msg message.Msg) { //raftWorker无限循环�
 		d.onTick()
 	case message.MsgTypeSplitRegion:
 		split := msg.Data.(*message.MsgSplitRegion)
-		log.Infof("%s on split with %v", d.Tag, split.SplitKey)
+		log.Infof("%s on split with %s", d.Tag, split.SplitKey)
 		d.onPrepareSplitRegion(split.RegionEpoch, split.SplitKey, split.Callback)
 	case message.MsgTypeRegionApproximateSize:
 		d.onApproximateRegionSize(msg.Data.(uint64))
@@ -587,6 +595,10 @@ func (d *peerMsgHandler) proposeAdminRequest(msg *raft_cmdpb.RaftCmdRequest, cb 
 			},
 		})
 	case raft_cmdpb.AdminCmdType_Split:
+		if err := util.CheckRegionEpoch(msg, d.Region(), true); err != nil {
+			cb.Done(ErrResp(err))
+			return
+		}
 		if err := util.CheckKeyInRegion(msg.AdminRequest.Split.SplitKey, d.Region()); err != nil {
 			cb.Done(ErrResp(err))
 			return

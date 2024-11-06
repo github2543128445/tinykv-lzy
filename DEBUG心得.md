@@ -19,3 +19,11 @@
 ### Project3B
 - 有关Region的操作都要记得检查是否为本区域以及版本号
 - Timeout问题，只剩两个节点，然后被移除的那个节点正好是 Leader。因为网络是 unreliable，Leader 广播给另一个 Node 的心跳正好被丢了，也就是另一个节点的 commit 并不会被推进，也就是对方节点并不会执行 remove node 操作。而这一切 Leader 并不知道，它自己调用 d.destroyPeer() 已经销毁了。此时另一个节点并没有移除 Leader，它会发起选举，但是永远赢不了，因为需要收到被移除 Leader 的投票。
+
+以上问题仍然存在，发现因为Unreliable网络导致备选leader节点完成同步的消息可能被错过，而leader也不会再发新消息了，因此没有机会知道已经被同步完成了
+但是解决了这个，仍然存在，比如leader总是在Snapshot，但是备选leader并不需要这个snapshot，而是需要正常的entry，但是并没有发回最新的next
+
+解决这个，又有新的，依然是Unreliable的锅，split，主节点已经揽下了工作，并进行了分裂，但从节点分裂的msg丢失了。只有两个空entry的节点硬选leader
+
+
+- Unreliable中，分裂前的指令，分裂后才到达，出现NotInRegion
