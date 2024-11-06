@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/metapb"
 	"github.com/pingcap-incubator/tinykv/proto/pkg/schedulerpb"
 	"github.com/pingcap-incubator/tinykv/scheduler/pkg/logutil"
@@ -279,7 +280,35 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *schedulerpb.StoreStats) error 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Your Code Here (3C).
-
+	newRegion := region.GetMeta()
+	if newRegion == nil {
+		return nil
+	}
+	oldRegion := c.GetRegion(newRegion.GetId())
+	if oldRegion != nil {
+		if newRegion.GetRegionEpoch() == nil || oldRegion.GetRegionEpoch() == nil {
+			return errors.Errorf("epoch nil")
+		}
+		if util.IsEpochStale(newRegion.GetRegionEpoch(), oldRegion.GetRegionEpoch()) {
+			return errors.Errorf("region heartbeat's newepoch is stale")
+		}
+	} else {
+		overlapRegions := c.ScanRegions(newRegion.GetStartKey(), newRegion.GetEndKey(), -1)
+		for _, overlapRegion := range overlapRegions {
+			if newRegion.GetRegionEpoch() == nil || overlapRegion.GetRegionEpoch() == nil {
+				return errors.Errorf("epoch nil")
+			}
+			if util.IsEpochStale(newRegion.GetRegionEpoch(), overlapRegion.GetRegionEpoch()) {
+				return errors.Errorf("region heartbeat's newepoch is stale")
+			}
+		}
+	}
+	if err := c.putRegion(region); err != nil {
+		return err
+	}
+	for _, store := range c.GetStores() {
+		c.updateStoreStatusLocked(store.GetID())
+	}
 	return nil
 }
 

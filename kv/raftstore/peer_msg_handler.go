@@ -299,8 +299,10 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 			}
 		case raft_cmdpb.CmdType_Snap:
 			//about snapshot
-			if request.Header.RegionEpoch.Version != d.Region().RegionEpoch.Version {
-				BindRespError(resp, &util.ErrEpochNotMatch{})
+			err := util.CheckRegionEpoch(request, d.Region(), true) //对比Epoch（每次分裂与合并，Epoch.Version++）
+			if err != nil {
+				BindRespError(resp, err)
+				return kvWB
 			} else {
 				// Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
 				kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
@@ -328,7 +330,7 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 	case raft_cmdpb.AdminCmdType_ChangePeer: //ChangeConf 不在这里处理
 	case raft_cmdpb.AdminCmdType_Split:
 		splitReq := request.AdminRequest.Split
-		log.Infof("[region %d] try to apply Split in key %s, new region id %d", d.regionId, splitReq.SplitKey, splitReq.NewRegionId)
+		log.Infof("[region %d %v] try to apply Split in key %s, new region id %d", d.regionId, d.Region().RegionEpoch, splitReq.SplitKey, splitReq.NewRegionId)
 		if request.Header.RegionId != d.regionId { //非本region
 			d.handleProposal(entry, ErrResp(&util.ErrRegionNotFound{RegionId: request.Header.RegionId}))
 			return kvWB
@@ -379,7 +381,8 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 		meta.WriteRegionState(kvWB, newRegion, rspb.PeerState_Normal)
 		d.ctx.storeMeta.Unlock()
-
+		log.Infof("old region %v", d.Region())
+		log.Infof("new region %v", newRegion)
 		//在本store节点上建立新node
 		newPeer, err := createPeer(d.storeID(), d.ctx.cfg, d.ctx.raftLogGCTaskSender, d.ctx.engine, newRegion)
 		if err != nil {

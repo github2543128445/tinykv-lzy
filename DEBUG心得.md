@@ -26,4 +26,4 @@
 解决这个，又有新的，依然是Unreliable的锅，split，主节点已经揽下了工作，并进行了分裂，但从节点分裂的msg丢失了。只有两个空entry的节点硬选leader
 
 
-- Unreliable中，分裂前的指令，分裂后才到达，出现NotInRegion
+- Unreliable中，scan,需要先获得key对应的regionID（无需Raft），然后通过regionID获得iter。“然后”之前，可能出现split的apply，此时key就不在原来region里了

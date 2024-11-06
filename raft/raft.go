@@ -357,7 +357,11 @@ func (r *Raft) becomeCandidate() {
 	r.electionElapsed = 0
 	r.resetRandElectionTimeout()
 	r.agreedCnt = 1
-	log.Infof("node %d becomeCandidate with Term %d, LastIndex%d,LastTerm%d", r.id, r.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm())
+	var s string
+	for i, _ := range r.Prs {
+		s = s + " " + strconv.Itoa(int(i))
+	}
+	log.Infof("node %d becomeCandidate with Term %d, LastIndex%d,LastTerm%d,peers[%s]", r.id, r.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm(), s)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -529,6 +533,7 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 		} else {
 			r.Prs[m.From].Match = m.Index
 			r.Prs[m.From].Next = m.Index + 1
+			log.Infof("AppendReject: node %d nextIndex %d", m.From, r.Prs[m.From].Next)
 			r.sendAppend(m.From)
 		}
 		return nil

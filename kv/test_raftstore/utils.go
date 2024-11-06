@@ -28,7 +28,8 @@ func NewPeer(storeID, peerID uint64) *metapb.Peer {
 
 func NewBaseRequest(regionID uint64, epoch *metapb.RegionEpoch) raft_cmdpb.RaftCmdRequest {
 	req := raft_cmdpb.RaftCmdRequest{}
-	req.Header = &raft_cmdpb.RaftRequestHeader{RegionId: regionID, RegionEpoch: epoch}
+	newepoch := metapb.RegionEpoch{ConfVer: epoch.ConfVer, Version: epoch.Version}
+	req.Header = &raft_cmdpb.RaftRequestHeader{RegionId: regionID, RegionEpoch: &newepoch}
 	return req
 }
 
