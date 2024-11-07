@@ -164,7 +164,7 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 	d.RaftGroup.ApplyConfChange(*cc)
 	switch cc.ChangeType {
 	case eraftpb.ConfChangeType_AddNode:
-		log.Infof("[region %d], try to apply addnode %d", d.regionId, cc.NodeId)
+		//log.Infof("[region %d], try to apply addnode %d", d.regionId, cc.NodeId)
 		if d.searchPeer(cc.NodeId) == len(thisRegion.Peers) {
 			storeMeta := d.ctx.storeMeta
 			storeMeta.Lock()
@@ -181,7 +181,7 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 			return kvWB
 		}
 	case eraftpb.ConfChangeType_RemoveNode:
-		log.Infof("[region %d], try to apply removenode %d", d.regionId, cc.NodeId)
+		//log.Infof("[region %d], try to apply removenode %d", d.regionId, cc.NodeId)
 		if cc.NodeId == d.PeerId() {
 			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
 			d.destroyPeer()
@@ -275,7 +275,7 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 		case raft_cmdpb.CmdType_Get:
 			cf := req.Get.Cf
 			key := req.Get.Key
-			err := util.CheckKeyInRegion(key, d.Region())
+			err = util.CheckKeyInRegion(key, d.Region())
 			if err != nil {
 				BindRespError(resp, err)
 			} else {
@@ -291,7 +291,7 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 			cf := req.Put.Cf
 			key := req.Put.Key
 			val := req.Put.Value
-			err := util.CheckKeyInRegion(key, d.Region())
+			err = util.CheckKeyInRegion(key, d.Region())
 			if err != nil {
 				BindRespError(resp, err) //这个check是针对区域负责范围的check，并非“是否存在该键值对”
 			} else {
@@ -304,7 +304,7 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 		case raft_cmdpb.CmdType_Delete:
 			cf := req.Delete.Cf
 			key := req.Delete.Key
-			err := util.CheckKeyInRegion(key, d.Region())
+			err = util.CheckKeyInRegion(key, d.Region())
 			if err != nil {
 				BindRespError(resp, err)
 			} else {
@@ -382,7 +382,7 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 			},
 			Peers: newPeersForMeta,
 		}
-		log.Infof("want new peer id:%v", splitReq.NewPeerIds)
+		//log.Infof("want new peer id:%v", splitReq.NewPeerIds)
 		//更新元数据
 		d.ctx.storeMeta.Lock()
 		d.Region().RegionEpoch.Version++

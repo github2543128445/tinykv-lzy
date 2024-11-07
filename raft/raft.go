@@ -470,7 +470,7 @@ func (r *Raft) stepMsgHup(m pb.Message) error {
 	}
 	r.becomeCandidate()
 	if len(r.Prs) == 1 {
-		log.Infof("only 1 peer, node %d become Leader", r.id)
+		//log.Infof("only 1 peer, node %d become Leader", r.id)
 		r.becomeLeader()
 		return nil
 	}
@@ -632,11 +632,11 @@ func (r *Raft) stepMsgHeartbeatResponse(m pb.Message) error {
 }
 func (r *Raft) stepMsgTransferLeader(m pb.Message) error {
 	if _, ok := r.Prs[m.From]; !ok {
-		log.Infof("leadTransferee: node %d not exist", m.From)
+		//log.Infof("leadTransferee: node %d not exist", m.From)
 		return nil
 	}
 	if r.id == m.From { //我和目标是同一人
-		log.Infof("[leadTransferee] node %d tried to itself", r.id)
+		//log.Infof("[leadTransferee] node %d tried to itself", r.id)
 		return nil
 	}
 	if r.leadTransferee == m.From {
