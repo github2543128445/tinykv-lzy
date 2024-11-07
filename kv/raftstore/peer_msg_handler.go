@@ -74,23 +74,32 @@ func (d *peerMsgHandler) HandleRaftReady() {
 	//about snapshot ↑
 	d.Send(d.ctx.trans, ready.Messages) //将rawnode.msgs通过上层在节点之间传递
 
-	if len(ready.CommittedEntries) > 0 {
+	for _, entry := range ready.CommittedEntries {
 		kvWB := &engine_util.WriteBatch{}
-		for _, entry := range ready.CommittedEntries {
-			kvWB = d.applyCommittedEntry(&entry, kvWB) //逐个取出Committed Entry，进行写入KVDB
-			if d.stopped {
-				return
-			}
+		kvWB = d.applyCommittedEntry(&entry, kvWB) //逐个取出Committed Entry，进行写入KVDB
+		if d.stopped {
+			return
 		}
+		d.peerStorage.applyState.AppliedIndex = entry.Index
 
-		d.peerStorage.applyState.AppliedIndex = ready.CommittedEntries[len(ready.CommittedEntries)-1].Index
 		err := kvWB.SetMeta(meta.ApplyStateKey(d.regionId), d.peerStorage.applyState)
 		//更新RaftApplyState并写入KvDB
 		if err != nil {
 			log.Panic(err)
 		}
+
 		kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
+		engines := d.peerStorage.Engines
+		txn := engines.Kv.NewTransaction(false)
+		regionId := d.peerStorage.Region().GetId()
+		regionState := new(rspb.RegionLocalState)
+		err = engine_util.GetMetaFromTxn(txn, meta.RegionStateKey(regionId), regionState)
+
+		if err != nil {
+			log.Panic(err)
+		}
 	}
+
 	d.RaftGroup.Advance(ready)
 }
 func (d *peerMsgHandler) applyCommittedEntry(entry *pb.Entry, kvWB *engine_util.WriteBatch) *engine_util.WriteBatch {
@@ -150,6 +159,9 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 
 	}
 	req := msg.AdminRequest.ChangePeer
+
+	// 从Raft层应用配置
+	d.RaftGroup.ApplyConfChange(*cc)
 	switch cc.ChangeType {
 	case eraftpb.ConfChangeType_AddNode:
 		log.Infof("[region %d], try to apply addnode %d", d.regionId, cc.NodeId)
@@ -163,7 +175,7 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 			meta.WriteRegionState(kvWB, thisRegion, rspb.PeerState_Normal)
 			d.insertPeerCache(req.Peer)
 			// 更新 metaStore 中的 region 信息
-			storeMeta.regions[thisRegion.Id] = thisRegion
+			storeMeta.regionRanges.ReplaceOrInsert(&regionItem{region: d.Region()})
 			storeMeta.Unlock()
 		} else {
 			return kvWB
@@ -171,6 +183,7 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 	case eraftpb.ConfChangeType_RemoveNode:
 		log.Infof("[region %d], try to apply removenode %d", d.regionId, cc.NodeId)
 		if cc.NodeId == d.PeerId() {
+			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
 			d.destroyPeer()
 			//d.startToDestroyPeer()
 			return kvWB
@@ -192,8 +205,7 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 		}
 
 	}
-	//从Raft层应用配置
-	d.RaftGroup.ApplyConfChange(*cc)
+
 	var s string
 	for i, _ := range d.RaftGroup.Raft.Prs {
 		s = s + " " + strconv.Itoa(int(i))
@@ -254,6 +266,11 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 		Responses: []*raft_cmdpb.Response{},
 	}
 	for _, req := range request.Requests {
+		err := util.CheckRegionEpoch(request, d.Region(), true) //对比Epoch（每次分裂与合并，Epoch.Version++）
+		if err != nil {
+			BindRespError(resp, err)
+			return kvWB
+		}
 		switch req.CmdType {
 		case raft_cmdpb.CmdType_Get:
 			cf := req.Get.Cf
@@ -299,19 +316,14 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 			}
 		case raft_cmdpb.CmdType_Snap:
 			//about snapshot
-			err := util.CheckRegionEpoch(request, d.Region(), true) //对比Epoch（每次分裂与合并，Epoch.Version++）
-			if err != nil {
-				BindRespError(resp, err)
-				return kvWB
-			} else {
-				// Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
-				kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
-				kvWB = &engine_util.WriteBatch{}
-				resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
-					CmdType: raft_cmdpb.CmdType_Snap,
-					Snap:    &raft_cmdpb.SnapResponse{Region: d.Region()},
-				})
-			}
+			log.Infof("[Snap region %d] request[%v],now region[%v,%s,%s]", d.regionId, request.Header.RegionEpoch, d.Region().RegionEpoch, d.Region().StartKey, d.Region().EndKey)
+			// Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
+			kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
+			kvWB = &engine_util.WriteBatch{}
+			resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
+				CmdType: raft_cmdpb.CmdType_Snap,
+				Snap:    &raft_cmdpb.SnapResponse{Region: d.Region()},
+			})
 		}
 	}
 	d.handleProposal(entry, resp)
@@ -324,8 +336,11 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 		if request.AdminRequest.CompactLog.CompactIndex > d.peerStorage.applyState.TruncatedState.Index {
 			d.peerStorage.applyState.TruncatedState.Index = request.AdminRequest.CompactLog.CompactIndex
 			d.peerStorage.applyState.TruncatedState.Term = request.AdminRequest.CompactLog.CompactTerm
+			err := kvWB.SetMeta(meta.ApplyStateKey(d.Region().GetId()), d.peerStorage.applyState)
+			if err != nil {
+				log.Panic(err)
+			}
 			d.ScheduleCompactLog(request.AdminRequest.CompactLog.CompactIndex)
-			//在外面将applyState写入了kvWB
 		}
 	case raft_cmdpb.AdminCmdType_ChangePeer: //ChangeConf 不在这里处理
 	case raft_cmdpb.AdminCmdType_Split:
@@ -378,10 +393,10 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 		d.ctx.storeMeta.regions[splitReq.NewRegionId] = newRegion
 		d.ctx.storeMeta.regionRanges.ReplaceOrInsert(&regionItem{newRegion})
 
-		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 		meta.WriteRegionState(kvWB, newRegion, rspb.PeerState_Normal)
+		meta.WriteRegionState(kvWB, d.Region(), rspb.PeerState_Normal)
 		d.ctx.storeMeta.Unlock()
-		log.Infof("old region %v", d.Region())
+		log.Infof("old region become %v", d.Region())
 		log.Infof("new region %v", newRegion)
 		//在本store节点上建立新node
 		newPeer, err := createPeer(d.storeID(), d.ctx.cfg, d.ctx.raftLogGCTaskSender, d.ctx.engine, newRegion)
@@ -409,8 +424,8 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 		})
 		log.Infof("old region %d become [%s,%s]", d.regionId, d.Region().StartKey, d.Region().EndKey)
 		log.Infof("new region %d has [%s,%s]", newRegion.Id, newRegion.StartKey, newRegion.EndKey)
-		d.notifyHeartbeatScheduler(d.Region(), d.peer)
 		d.notifyHeartbeatScheduler(newRegion, newPeer)
+		d.notifyHeartbeatScheduler(d.Region(), d.peer)
 	}
 
 	return kvWB

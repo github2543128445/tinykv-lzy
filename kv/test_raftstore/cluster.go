@@ -3,7 +3,6 @@ package test_raftstore
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -191,7 +190,7 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 		log.Infof("1 key %s request in region %d,epoch %v", key, regionID, region.RegionEpoch)
 		req := NewRequest(regionID, region.RegionEpoch, reqs)
 		resp, txn := c.CallCommandOnLeader(&req, timeout)
-		log.Infof("2 key %s request in region %d,epoch %v", key, regionID, region.RegionEpoch)
+		log.Infof("2 key %s request[%v] in region %d,epoch %v", key, req.Header.RegionEpoch, regionID, region.RegionEpoch)
 		if resp == nil {
 			// it should be timeouted innerly
 			SleepMS(100)
@@ -203,9 +202,10 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 		}
 		newregionID := c.GetRegion(key).GetId() //完成apply前，region可能split
 		if newregionID != regionID {
+			log.Infof("FU, it really happen")
 			continue
 		}
-		log.Infof("3 key %s request in region %d,epoch %v", key, regionID, region.RegionEpoch)
+		defer log.Infof("3 key %s request[%v] in region %d,epoch %v", key, req.Header.RegionEpoch, regionID, region.RegionEpoch)
 		return resp, txn
 	}
 	panic("request timeout")
@@ -283,7 +283,7 @@ func (c *Cluster) GetRegion(key []byte) *metapb.Region {
 		// retry to get the region again.
 		SleepMS(20)
 	}
-	panic(fmt.Sprintf("find no region for %s", hex.EncodeToString(key)))
+	panic(fmt.Sprintf("find no region for %s", key))
 }
 
 func (c *Cluster) GetRandomRegion() *metapb.Region {
@@ -381,8 +381,13 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 			panic("resp.Responses[0].CmdType != raft_cmdpb.CmdType_Snap")
 		}
 		region := resp.Responses[0].GetSnap().Region
-		iter := raft_storage.NewRegionReader(txn, *region).IterCF(engine_util.CfDefault)
 		log.Infof("4 make iter from key %s in region %d,epoch %v", key, region.Id, region.RegionEpoch)
+		iter := raft_storage.NewRegionReader(txn, *region).IterCF(engine_util.CfDefault)
+		if region.Id != c.GetRegion(key).Id {
+			log.Infof("66666,find you")
+			iter.Close()
+			continue
+		}
 		for iter.Seek(key); iter.Valid(); iter.Next() {
 			if engine_util.ExceedEndKey(iter.Item().Key(), end) {
 				break
@@ -392,9 +397,10 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 				panic(err)
 			}
 			values = append(values, value)
+
 		}
 		iter.Close()
-
+		log.Infof("Scan[%s,%s],this region %d get[%s,%s],now values %s", start, end, region.Id, key, region.EndKey, string(bytes.Join(values, []byte(""))))
 		key = region.EndKey
 		if len(key) == 0 {
 			break

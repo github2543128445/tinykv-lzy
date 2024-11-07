@@ -26,4 +26,10 @@
 解决这个，又有新的，依然是Unreliable的锅，split，主节点已经揽下了工作，并进行了分裂，但从节点分裂的msg丢失了。只有两个空entry的节点硬选leader
 
 
+
 - Unreliable中，scan,需要先获得key对应的regionID（无需Raft），然后通过regionID获得iter。“然后”之前，可能出现split的apply，此时key就不在原来region里了
+在applyCommitedEntry时操作错误，之前是将多个entry都处理完了之后一起提交，但是现在这个就成了罪魁祸首
+
+
+
+want but get，region1一开始是[0,无穷],want[4000,4001],一开始在region1扫描的好好的，半路分裂了
