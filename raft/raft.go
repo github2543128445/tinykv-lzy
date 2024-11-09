@@ -603,11 +603,9 @@ func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
 		}
 		log.Infof("node %d becomeLeader, enough votes. now region has %d peer[%s]", r.id, len(r.Prs), s)
 		r.becomeLeader()
-	} else {
-		if len(r.votes)-r.agreedCnt >= majority {
-			log.Infof("node %d becomeLeader fail, unenough votes", r.id)
-			r.becomeFollower(r.Term, None)
-		}
+	} else if len(r.votes)-r.agreedCnt >= majority {
+		log.Infof("node %d becomeLeader fail, unenough votes", r.id)
+		r.becomeFollower(r.Term, None)
 	}
 	return nil
 }

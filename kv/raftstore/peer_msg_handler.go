@@ -300,6 +300,8 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 					CmdType: raft_cmdpb.CmdType_Put,
 					Put:     &raft_cmdpb.PutResponse{},
 				})
+				kvWB.MustWriteToDB(d.ctx.engine.Kv) //写入KVDB
+				kvWB.Reset()
 			}
 		case raft_cmdpb.CmdType_Delete:
 			cf := req.Delete.Cf
@@ -313,10 +315,12 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 					CmdType: raft_cmdpb.CmdType_Delete,
 					Delete:  &raft_cmdpb.DeleteResponse{},
 				})
+				kvWB.MustWriteToDB(d.ctx.engine.Kv) //写入KVDB
+				kvWB.Reset()
 			}
 		case raft_cmdpb.CmdType_Snap:
 			//about snapshot
-			log.Infof("[Snap region %d] request[%v],now region[%v,%s,%s]", d.regionId, request.Header.RegionEpoch, d.Region().RegionEpoch, d.Region().StartKey, d.Region().EndKey)
+			//log.Infof("[Snap region %d] request[%v],now region[%v,%s,%s]", d.regionId, request.Header.RegionEpoch, d.Region().RegionEpoch, d.Region().StartKey, d.Region().EndKey)
 			// Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
 			kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
 			kvWB = &engine_util.WriteBatch{}
@@ -422,8 +426,8 @@ func (d *peerMsgHandler) applyAdminRequest(entry *pb.Entry, request *raft_cmdpb.
 				},
 			},
 		})
-		log.Infof("old region %d become [%s,%s]", d.regionId, d.Region().StartKey, d.Region().EndKey)
-		log.Infof("new region %d has [%s,%s]", newRegion.Id, newRegion.StartKey, newRegion.EndKey)
+		//log.Infof("old region %d become [%s,%s]", d.regionId, d.Region().StartKey, d.Region().EndKey)
+		//log.Infof("new region %d has [%s,%s]", newRegion.Id, newRegion.StartKey, newRegion.EndKey)
 		d.notifyHeartbeatScheduler(newRegion, newPeer)
 		d.notifyHeartbeatScheduler(d.Region(), d.peer)
 	}

@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Connor1996/badger"
@@ -365,7 +367,11 @@ func (c *Cluster) MustDeleteCF(cf string, key []byte) {
 	}
 }
 
-func (c *Cluster) Scan(start, end []byte) [][]byte {
+// [ , )
+func (c *Cluster) Scan(start, end []byte) [][]byte { //MayBUG add many things
+	intStart, _ := strconv.Atoi(strings.ReplaceAll(string(start), " ", ""))
+	intEnd, _ := strconv.Atoi(strings.ReplaceAll(string(end), " ", ""))
+	nums := intEnd - intStart
 	req := NewSnapCmd()
 	values := make([][]byte, 0)
 	key := start
@@ -388,6 +394,9 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 			iter.Close()
 			continue
 		}
+		getVal := 0
+		oriEndKey := make([]byte, len(region.EndKey))
+		copy(oriEndKey, region.EndKey)
 		for iter.Seek(key); iter.Valid(); iter.Next() {
 			if engine_util.ExceedEndKey(iter.Item().Key(), end) {
 				break
@@ -397,11 +406,22 @@ func (c *Cluster) Scan(start, end []byte) [][]byte {
 				panic(err)
 			}
 			values = append(values, value)
-
+			getVal++
+			if len(values) >= nums {
+				break
+			}
 		}
 		iter.Close()
 		log.Infof("Scan[%s,%s],this region %d get[%s,%s],now values %s", start, end, region.Id, key, region.EndKey, string(bytes.Join(values, []byte(""))))
-		key = region.EndKey
+		if len(values) == nums {
+			break
+		}
+		if (len(values) > nums) || (len(region.EndKey) != 0 && bytes.Compare(key, region.EndKey) > 0) {
+			log.Infof("Scan[%s,%s],split happen in region %d,abandon this values", start, end, region.Id)
+			values = values[:len(values)-getVal]
+			continue
+		}
+		key = oriEndKey //如果中途分裂，可以正常取值，但是endkey会变成中间的，导致后部分重复，以oriEndKey来更新
 		if len(key) == 0 {
 			break
 		}
