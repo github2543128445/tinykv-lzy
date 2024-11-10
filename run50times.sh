@@ -13,7 +13,7 @@ rm -rf ./out-50/*
 
 for ((i=1,j=100;i<=j;i++)); do
     echo "ROUND $i/$j"
-    make project3b > ./out-50/out-$i.txt
+    make project2 > ./out-50/out-$i.txt
 
     # 检查文件中是否包含“FAIL”
     if check_fail "./out-50/out-$i.txt"; then

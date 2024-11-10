@@ -38,3 +38,6 @@ want but get，region1一开始是[0,无穷],want[4000,4001],一开始在region1
 
 
 大多数错误已经修正，只有极个别情况：
+leader就是申请不出来Snapshot timeout
+大量停机，无人响应的 timeout  - no region for key X
+集群刚split，但是只产生了两个节点，未知原因剩下节点都不产生，这俩节点以为有5个，谁都想当leader，谁都当不成 timeout
