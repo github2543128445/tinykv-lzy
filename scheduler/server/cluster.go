@@ -278,26 +278,26 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *schedulerpb.StoreStats) error 
 }
 
 // processRegionHeartbeat updates the region information.
+
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Your Code Here (3C).
+	newEpoch := region.GetRegionEpoch()
+	if newEpoch == nil {
+		return errors.Errorf("epoch nil")
+	}
+
 	newRegion := region.GetMeta()
 	if newRegion == nil {
 		return nil
 	}
 	oldRegion := c.GetRegion(newRegion.GetId())
 	if oldRegion != nil {
-		if newRegion.GetRegionEpoch() == nil || oldRegion.GetRegionEpoch() == nil {
-			return errors.Errorf("epoch nil")
-		}
 		if util.IsEpochStale(newRegion.GetRegionEpoch(), oldRegion.GetRegionEpoch()) {
 			return errors.Errorf("region heartbeat's newepoch is stale")
 		}
 	} else {
 		overlapRegions := c.ScanRegions(newRegion.GetStartKey(), newRegion.GetEndKey(), -1)
 		for _, overlapRegion := range overlapRegions {
-			if newRegion.GetRegionEpoch() == nil || overlapRegion.GetRegionEpoch() == nil {
-				return errors.Errorf("epoch nil")
-			}
 			if util.IsEpochStale(newRegion.GetRegionEpoch(), overlapRegion.GetRegionEpoch()) {
 				return errors.Errorf("region heartbeat's newepoch is stale")
 			}

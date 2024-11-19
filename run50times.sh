@@ -11,7 +11,7 @@ check_fail() {
 
 rm -rf ./out-50/*
 
-for ((i=1,j=100;i<=j;i++)); do
+for ((i=1,j=50;i<=j;i++)); do
     echo "ROUND $i/$j"
     make project3c > ./out-50/out-$i.txt
 
