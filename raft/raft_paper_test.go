@@ -50,33 +50,25 @@ func TestLeaderUpdateTermFromMessage2AA(t *testing.T) {
 // it immediately reverts to follower state.
 // Reference: section 5.1
 func testUpdateTermFromMessage(t *testing.T, state StateType) {
-
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-	//fmt.Println("0")
 	switch state {
 	case StateFollower:
-		//fmt.Println("11")
 		r.becomeFollower(1, 2)
 	case StateCandidate:
-		//fmt.Println("12")
 		r.becomeCandidate()
 	case StateLeader:
-		//fmt.Println("13")
 		r.becomeCandidate()
-		//fmt.Println("14")
 		r.becomeLeader()
 	}
-	//fmt.Println("3")
+
 	r.Step(pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 2})
-	//fmt.Println("4")
+
 	if r.Term != 2 {
 		t.Errorf("term = %d, want %d", r.Term, 2)
 	}
-	//fmt.Println("5")
 	if r.State != StateFollower {
 		t.Errorf("state = %v, want %v", r.State, StateFollower)
 	}
-	//fmt.Println("6")
 }
 
 // TestStartAsFollower tests that when servers start up, they begin as followers.
@@ -198,7 +190,7 @@ func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 	for i, tt := range tests {
 		r := newTestRaft(1, idsBySize(tt.size), 10, 1, NewMemoryStorage())
 
-		r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup}) //本节点选举
+		r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 		for id, vote := range tt.votes {
 			r.Step(pb.Message{From: id, To: 1, Term: r.Term, MsgType: pb.MessageType_MsgRequestVoteResponse, Reject: !vote})
 		}
@@ -576,8 +568,6 @@ func TestFollowerCommitEntry2AB(t *testing.T) {
 // then it refuses the new entries. Otherwise it replies that it accepts the
 // append entries.
 // Reference: section 5.3
-// 测试如果跟随者在其日志中未找到与 AppendEntries RPC 中具有相同索引和任期的条目
-// 那么它会拒绝新的条目。否则，它回复表示接受附加条目。
 func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 	ents := []pb.Entry{{Term: 1, Index: 1}, {Term: 2, Index: 2}}
 	tests := []struct {
@@ -587,14 +577,14 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 	}{
 		// match with committed entries
 		{0, 0, false},
-		{ents[0].Term, ents[0].Index, false}, //1，1，F
+		{ents[0].Term, ents[0].Index, false},
 		// match with uncommitted entries
-		{ents[1].Term, ents[1].Index, false}, //2，2，F
+		{ents[1].Term, ents[1].Index, false},
 
 		// unmatch with existing entry
-		{ents[0].Term, ents[1].Index, true}, //1，2，T
+		{ents[0].Term, ents[1].Index, true},
 		// unexisting entry
-		{ents[1].Term + 1, ents[1].Index + 1, true}, //3，3，T
+		{ents[1].Term + 1, ents[1].Index + 1, true},
 	}
 	for i, tt := range tests {
 		storage := NewMemoryStorage()
@@ -624,15 +614,13 @@ func TestFollowerCheckMessageType_MsgAppend2AB(t *testing.T) {
 // and append any new entries not already in the log.
 // Also, it writes the new entry into stable storage.
 // Reference: section 5.3
-// 当 AppendEntries RPC 有效时，跟随者将删除现有的冲突条目及其后的所有条目，并附加任何尚未在日志中的新条目。
-// 此外，它将新条目写入稳定存储。
 func TestFollowerAppendEntries2AB(t *testing.T) {
 	tests := []struct {
-		index, term uint64      //log i&term
-		lterm       uint64      //node term
-		ents        []*pb.Entry //ent in leader's msg
-		wents       []*pb.Entry //right ans
-		wunstable   []*pb.Entry //unstable ans
+		index, term uint64
+		lterm       uint64
+		ents        []*pb.Entry
+		wents       []*pb.Entry
+		wunstable   []*pb.Entry
 	}{
 		{
 			2, 2, 3,
@@ -670,7 +658,7 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 		wents := make([]pb.Entry, 0, len(tt.wents))
 		for _, ent := range tt.wents {
 			wents = append(wents, *ent)
-		} //copy
+		}
 		if g := r.RaftLog.allEntries(); !reflect.DeepEqual(g, wents) {
 			t.Errorf("#%d: ents = %+v, want %+v", i, g, wents)
 		}
@@ -817,7 +805,6 @@ func TestVoteRequest2AB(t *testing.T) {
 // TestVoter tests the voter denies its vote if its own log is more up-to-date
 // than that of the candidate.
 // Reference: section 5.4.1
-// TestVoter 测试如果投票者自身的日志比候选者的日志更新，投票者会拒绝投票。
 func TestVoter2AB(t *testing.T) {
 	tests := []struct {
 		ents    []pb.Entry
@@ -916,7 +903,6 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 	for _, m := range msgs {
 		if m.MsgType != pb.MessageType_MsgAppend || len(m.Entries) != 1 || m.Entries[0].Data != nil {
 			panic("not a message to append noop entry")
-			//
 		}
 		r.Step(acceptAndReply(m))
 	}

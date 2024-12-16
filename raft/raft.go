@@ -22,7 +22,6 @@ import (
 	"strconv"
 
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/util"
-	"github.com/pingcap-incubator/tinykv/log"
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -227,10 +226,6 @@ func (l *RaftLog) FirstIndex() uint64 {
 // current commit index to the given peer. Returns true if a message was sent.
 // sendAppend 向给定的对等节点发送一个带有新条目（如果有）和当前提交索引的追加 RPC。如果发送了消息则返回 true。
 func (r *Raft) sendAppend(to uint64) bool {
-	//MayProblem 有时出现如下字段：
-	// 	RUN   TestSnapshotUnreliableRecoverConcurrentPartition2C
-	// 2024/10/24 19:42:35 levels.go:823: [warning] STALLED STALLED STALLED STALLED STALLED STALLED STALLED STALLED: 2562047h47m16.854775807s
-	// 2024/10/24 19:42:35 levels.go:846: [warning] Waiting to add level 0 table. Compaction priorities: [{level:0 score:2}]
 
 	// Your Code Here (2A).
 	if _, ok := r.Prs[to]; !ok {
@@ -241,7 +236,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 	prevLogTerm, err := r.RaftLog.Term(prevLogIndex)
 	if err == nil && prevLogIndex+1 >= r.RaftLog.dummyIndex {
 		if len(r.Prs) == 2 {
-			log.Infof("leader %d send entry[%d,%d] to node %d", r.id, prevLogIndex+1, r.RaftLog.LastIndex(), to)
+			//InfoNeed log.Infof("leader %d send entry[%d,%d] to node %d", r.id, prevLogIndex+1, r.RaftLog.LastIndex(), to)
 		}
 		appendMsg := pb.Message{
 			MsgType: pb.MessageType_MsgAppend,
@@ -261,20 +256,20 @@ func (r *Raft) sendAppend(to uint64) bool {
 		//做好发送准备即可
 		return true
 	} else { //在快照中
-		log.Infof("leader %d has entry[%d,%d], node %d need entry from %d", r.id, r.RaftLog.dummyIndex, r.RaftLog.LastIndex(), to, prevLogIndex+1)
+		//InfoNeedlog.Infof("leader %d has entry[%d,%d], node %d need entry from %d", r.id, r.RaftLog.dummyIndex, r.RaftLog.LastIndex(), to, prevLogIndex+1)
 		var snapshot pb.Snapshot
 		var err error
 		if !IsEmptySnap(r.RaftLog.pendingSnapshot) {
 			snapshot = *r.RaftLog.pendingSnapshot // 挂起的还未处理的快照
-			log.Infof("node %d try to send Snapshot to %d ,success with pendingSnapshot", r.id, to)
+			//InfoNeedlog.Infof("node %d try to send Snapshot to %d ,success with pendingSnapshot", r.id, to)
 		} else {
 			snapshot, err = r.RaftLog.storage.Snapshot() // 本节点生成一份快照
 			if err != nil {                              //还没准备好
-				log.Infof("node %d try to send Snapshot to %d ,but fail", r.id, to)
+				//InfoNeedlog.Infof("node %d try to send Snapshot to %d ,but fail", r.id, to)
 				//异步执行，本次没准备好直接不管了，下次再说就是了
 				return false
 			}
-			log.Infof("node %d try to send Snapshot to %d ,success, snapshot index%d,term%d, leader index%d,term%d", r.id, to, snapshot.Metadata.Index, snapshot.Metadata.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm())
+			//InfoNeedlog.Infof("node %d try to send Snapshot to %d ,success, snapshot index%d,term%d, leader index%d,term%d", r.id, to, snapshot.Metadata.Index, snapshot.Metadata.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm())
 		}
 		r.msgs = append(r.msgs, pb.Message{
 			MsgType:  pb.MessageType_MsgSnapshot,
@@ -361,7 +356,7 @@ func (r *Raft) becomeCandidate() {
 	for i, _ := range r.Prs {
 		s = s + " " + strconv.Itoa(int(i))
 	}
-	log.Infof("node %d becomeCandidate with Term %d, LastIndex%d,LastTerm%d,peers[%s]", r.id, r.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm(), s)
+	//InfoNeedlog.Infof("node %d becomeCandidate with Term %d, LastIndex%d,LastTerm%d,peers[%s]", r.id, r.Term, r.RaftLog.LastIndex(), r.RaftLog.LastTerm(), s)
 }
 
 // becomeLeader transform this peer's state to leader
@@ -385,7 +380,7 @@ func (r *Raft) leaderStep(m pb.Message) error {
 	case pb.MessageType_MsgPropose:
 		return r.stepMsgPropose(m)
 	case pb.MessageType_MsgAppend:
-		if r.leadTransferee != None { //MayBUG 领导转让期间拒绝新添加entry
+		if r.leadTransferee != None {
 			return nil
 		} else {
 			return r.stepMsgAppend(m) //上层向领导直接step（append）
@@ -402,7 +397,7 @@ func (r *Raft) leaderStep(m pb.Message) error {
 		return r.stepMsgHeartbeatResponse(m)
 	case pb.MessageType_MsgTransferLeader:
 		return r.stepMsgTransferLeader(m)
-	case pb.MessageType_MsgTimeoutNow: //MayBUG leader应该不会收到吧
+	case pb.MessageType_MsgTimeoutNow:
 
 	}
 	return nil
@@ -533,7 +528,7 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 		} else {
 			r.Prs[m.From].Match = m.Index
 			r.Prs[m.From].Next = m.Index + 1
-			log.Infof("AppendReject: node %d nextIndex %d", m.From, r.Prs[m.From].Next)
+			//InfoNeedlog.Infof("AppendReject: node %d nextIndex %d", m.From, r.Prs[m.From].Next)
 			r.sendAppend(m.From)
 		}
 		return nil
@@ -553,7 +548,7 @@ func (r *Raft) stepMsgAppendResponse(m pb.Message) error {
 			if r.RaftLog.LastIndex() == r.Prs[m.From].Match {
 				r.sendMsgTimeoutNow(m.From) //补全了日志就可以开始选举了
 			} else {
-				log.Infof("leadTransferee: leader%d lastIndex%d,node%d match%d", r.id, r.RaftLog.LastIndex(), m.From, r.Prs[m.From].Match)
+				//InfoNeedlog.Infof("leadTransferee: leader%d lastIndex%d,node%d match%d", r.id, r.RaftLog.LastIndex(), m.From, r.Prs[m.From].Match)
 			}
 		}
 		return nil
@@ -591,7 +586,7 @@ func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
 
 	} else {
 		if r.Term < m.Term {
-			log.Infof("node %d becomeLeader failed because of less Term %d < %d", r.id, r.Term, m.Term)
+			//InfoNeed log.Infof("node %d becomeLeader failed because of less Term %d < %d", r.id, r.Term, m.Term)
 			r.becomeFollower(m.Term, None)
 		}
 	}
@@ -601,10 +596,10 @@ func (r *Raft) stepMsgRequestVoteResponse(m pb.Message) error {
 		for i, _ := range r.Prs {
 			s = s + " " + strconv.Itoa(int(i))
 		}
-		log.Infof("node %d becomeLeader, enough votes. now region has %d peer[%s]", r.id, len(r.Prs), s)
+		//InfoNeed log.Infof("node %d becomeLeader, enough votes. now region has %d peer[%s]", r.id, len(r.Prs), s)
 		r.becomeLeader()
 	} else if len(r.votes)-r.agreedCnt >= majority {
-		log.Infof("node %d becomeLeader fail, unenough votes", r.id)
+		//InfoNeed log.Infof("node %d becomeLeader fail, unenough votes", r.id)
 		r.becomeFollower(r.Term, None)
 	}
 	return nil
@@ -638,16 +633,16 @@ func (r *Raft) stepMsgTransferLeader(m pb.Message) error {
 		return nil
 	}
 	if r.leadTransferee == m.From {
-		log.Infof("[leadTransferee] node %d already tried leadTransferee to node %d", r.id, m.From)
+		//InfoNeed log.Infof("[leadTransferee] node %d already tried leadTransferee to node %d", r.id, m.From)
 		r.sendAppend(m.From) //因为在AppendResponse中处理转移，所以如果AppendResponse因为网络Miss了，leader永远不知道对方已经齐了
 	}
 	r.leadTransferee = m.From //这个状态实际上是标记当前在“准备”Transfer,
 	//不用主动清理，对象开启选举后，任期增加，当前leader一定被顶掉，becomeFollower就清理了
 	if r.Prs[m.From].Match == r.RaftLog.LastIndex() { //已有最新日志
-		log.Infof("leader %d trans to node %d, sendTimeoutNow", r.id, m.From)
+		//InfoNeed log.Infof("leader %d trans to node %d, sendTimeoutNow", r.id, m.From)
 		r.sendMsgTimeoutNow(m.From)
 	} else {
-		log.Infof("leader %d want to trans to node %d, update destination's entries", r.id, m.From)
+		//InfoNeed log.Infof("leader %d want to trans to node %d, update destination's entries", r.id, m.From)
 		r.sendAppend(m.From)
 	}
 
@@ -727,7 +722,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			}
 		}
 		if len(r.Prs) == 2 {
-			log.Infof("node %d get leader %d but mismatch, want entry from %d", r.id, r.Lead, resp.Index+1)
+			//InfoNeed log.Infof("node %d get leader %d but mismatch, want entry from %d", r.id, r.Lead, resp.Index+1)
 		}
 
 	} else {
@@ -754,7 +749,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		resp.Index = m.Index + uint64(len(m.Entries))
 		resp.LogTerm, _ = r.RaftLog.Term(resp.Index)
 		if len(r.Prs) == 2 {
-			log.Infof("node %d get leader %d entries,now last entry index%d", r.id, r.Lead, resp.Index+1)
+			//InfoNeed log.Infof("node %d get leader %d entries,now last entry index%d", r.id, r.Lead, resp.Index+1)
 		}
 
 	}
@@ -794,7 +789,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 	if m.Term >= r.Term {
 		if r.RaftLog.committed >= m.Snapshot.Metadata.Index {
 			resp.Index = r.RaftLog.committed
-			log.Infof("node %d get snapshot from node %d(leader %d).Rejected, Snapshot's Index %d,already commit %d", r.id, r.Lead, m.From, m.Snapshot.Metadata.Index, r.RaftLog.committed)
+			//InfoNeed log.Infof("node %d get snapshot from node %d(leader %d).Rejected, Snapshot's Index %d,already commit %d", r.id, r.Lead, m.From, m.Snapshot.Metadata.Index, r.RaftLog.committed)
 		} else {
 			resp.Reject = false
 			r.becomeFollower(m.Term, m.From)
@@ -815,7 +810,7 @@ func (r *Raft) handleSnapshot(m pb.Message) {
 				}
 			}
 			resp.Index = m.Snapshot.Metadata.Index
-			log.Infof("node %d get snapshot from node %d(leader %d).Accept, next Index %d", r.id, r.Lead, m.From, resp.Index+1)
+			//InfoNeed log.Infof("node %d get snapshot from node %d(leader %d).Accept, next Index %d", r.id, r.Lead, m.From, resp.Index+1)
 		}
 	}
 

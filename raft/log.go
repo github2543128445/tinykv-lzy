@@ -179,7 +179,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) { //有可能是快照中的，
 }
 
 func (l *RaftLog) DeleteFrom(i uint64) {
-	// MayBug  i < l.dummyIndex 或许应该全删除？
+	// MayBUG  i < l.dummyIndex 或许应该全删除？暂时看不到必要性
 	if i < l.dummyIndex || len(l.entries) <= 0 || i > l.LastIndex() {
 		return
 	}

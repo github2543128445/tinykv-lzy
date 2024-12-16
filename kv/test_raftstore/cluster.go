@@ -3,13 +3,12 @@ package test_raftstore
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Connor1996/badger"
@@ -189,10 +188,8 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 	for i := 0; i < 10 || time.Since(startTime) < timeout; i++ {
 		region := c.GetRegion(key)
 		regionID := region.GetId()
-		//log.Infof("1 key %s request in region %d,epoch %v", key, regionID, region.RegionEpoch)
 		req := NewRequest(regionID, region.RegionEpoch, reqs)
 		resp, txn := c.CallCommandOnLeader(&req, timeout)
-		//log.Infof("2 key %s request[%v] in region %d,epoch %v", key, req.Header.RegionEpoch, regionID, region.RegionEpoch)
 		if resp == nil {
 			// it should be timeouted innerly
 			SleepMS(100)
@@ -202,12 +199,6 @@ func (c *Cluster) Request(key []byte, reqs []*raft_cmdpb.Request, timeout time.D
 			SleepMS(100)
 			continue
 		}
-		newregionID := c.GetRegion(key).GetId() //完成apply前，region可能split
-		if newregionID != regionID {
-			log.Infof("FU, it really happen")
-			continue
-		}
-		//defer log.Infof("3 key %s request[%v] in region %d,epoch %v", key, req.Header.RegionEpoch, regionID, region.RegionEpoch)
 		return resp, txn
 	}
 	panic("request timeout")
@@ -285,7 +276,7 @@ func (c *Cluster) GetRegion(key []byte) *metapb.Region {
 		// retry to get the region again.
 		SleepMS(20)
 	}
-	panic(fmt.Sprintf("find no region for %s", key))
+	panic(fmt.Sprintf("find no region for %s", hex.EncodeToString(key)))
 }
 
 func (c *Cluster) GetRandomRegion() *metapb.Region {
@@ -367,11 +358,7 @@ func (c *Cluster) MustDeleteCF(cf string, key []byte) {
 	}
 }
 
-// [ , )
-func (c *Cluster) Scan(start, end []byte) [][]byte { //MayBUG add many things
-	intStart, _ := strconv.Atoi(strings.ReplaceAll(string(start), " ", ""))
-	intEnd, _ := strconv.Atoi(strings.ReplaceAll(string(end), " ", ""))
-	nums := intEnd - intStart
+func (c *Cluster) Scan(start, end []byte) [][]byte {
 	req := NewSnapCmd()
 	values := make([][]byte, 0)
 	key := start
@@ -387,16 +374,7 @@ func (c *Cluster) Scan(start, end []byte) [][]byte { //MayBUG add many things
 			panic("resp.Responses[0].CmdType != raft_cmdpb.CmdType_Snap")
 		}
 		region := resp.Responses[0].GetSnap().Region
-		//log.Infof("4 make iter from key %s in region %d,epoch %v", key, region.Id, region.RegionEpoch)
 		iter := raft_storage.NewRegionReader(txn, *region).IterCF(engine_util.CfDefault)
-		if region.Id != c.GetRegion(key).Id {
-			log.Infof("66666,find you")
-			iter.Close()
-			continue
-		}
-		getVal := 0
-		oriEndKey := make([]byte, len(region.EndKey))
-		copy(oriEndKey, region.EndKey)
 		for iter.Seek(key); iter.Valid(); iter.Next() {
 			if engine_util.ExceedEndKey(iter.Item().Key(), end) {
 				break
@@ -406,26 +384,15 @@ func (c *Cluster) Scan(start, end []byte) [][]byte { //MayBUG add many things
 				panic(err)
 			}
 			values = append(values, value)
-			getVal++
-			if len(values) >= nums {
-				break
-			}
 		}
 		iter.Close()
-		log.Infof("Scan[%s,%s],this region %d get[%s,%s],now values %s", start, end, region.Id, key, region.EndKey, string(bytes.Join(values, []byte(""))))
-		if len(values) == nums {
-			break
-		}
-		if (len(values) > nums) || (len(region.EndKey) != 0 && bytes.Compare(key, region.EndKey) > 0) {
-			log.Infof("Scan[%s,%s],split happen in region %d,abandon this values", start, end, region.Id)
-			values = values[:len(values)-getVal]
-			continue
-		}
-		key = oriEndKey //如果中途分裂，可以正常取值，但是endkey会变成中间的，导致后部分重复，以oriEndKey来更新
+
+		key = region.EndKey
 		if len(key) == 0 {
 			break
 		}
 	}
+
 	return values
 }
 

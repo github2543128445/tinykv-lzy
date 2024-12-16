@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"math/rand"
-
 	"github.com/Connor1996/badger/y"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/message"
 	"github.com/pingcap-incubator/tinykv/kv/raftstore/meta"
@@ -185,7 +183,7 @@ func (d *peerMsgHandler) applyConfChange(entry *pb.Entry, cc *pb.ConfChange, kvW
 	case eraftpb.ConfChangeType_RemoveNode:
 		//log.Infof("[region %d], try to apply removenode %d", d.regionId, cc.NodeId)
 		if cc.NodeId == d.PeerId() {
-			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId)) //mayBUG 不用修改元数据吗？
+			kvWB.DeleteMeta(meta.ApplyStateKey(d.regionId))
 			d.destroyPeer()
 			//d.startToDestroyPeer()
 			return kvWB
@@ -543,15 +541,17 @@ func (d *peerMsgHandler) proposeAdminRequest(msg *raft_cmdpb.RaftCmdRequest, cb 
 		if err != nil {
 			log.Panic(err)
 		}
+
 		if msg.AdminRequest.ChangePeer.ChangeType == eraftpb.ConfChangeType_RemoveNode &&
 			msg.AdminRequest.ChangePeer.Peer.Id == d.PeerId() && d.IsLeader() { //leader要删除自己，无论剩几个节点，都给别人，增加安全性
 			log.Infof("[region %d] try to delete leader %d", d.regionId, d.LeaderId())
-			p := d.Region().Peers[rand.Intn(len(d.Region().Peers))]
-			for p.Id == d.LeaderId() {
-				p = d.Region().Peers[rand.Intn(len(d.Region().Peers))]
+			for _, p := range d.Region().Peers {
+				if p.Id != d.LeaderId() {
+					log.Infof("[region %d] Node %d try to transfer leader to %d", d.regionId, d.PeerId(), p.Id)
+					d.RaftGroup.TransferLeader(p.Id) //先随便转让给另一节点再说
+					break
+				}
 			}
-			log.Infof("[region %d] Node %d try to transfer leader to %d", d.regionId, d.PeerId(), p.Id)
-			d.RaftGroup.TransferLeader(p.Id) //先随便转让给另一节点再说
 			return
 		}
 		CC := eraftpb.ConfChange{

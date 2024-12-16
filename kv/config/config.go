@@ -62,7 +62,7 @@ const (
 )
 
 func getLogLevel() (logLevel string) {
-	logLevel = "fatal" //Change Log
+	logLevel = "fatal" //修改此处 改变log详细程度，fatal几乎没log，info是详细log
 	//case "fatal":
 	// 	return LOG_LEVEL_FATAL
 	//case "error":

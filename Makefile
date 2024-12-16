@@ -152,6 +152,8 @@ project3b1:
 project3c:
 	$(GOTEST) ./scheduler/server ./scheduler/server/schedulers -check.f="3C"
 
+project23: project2 project3
+
 project4: project4a project4b project4c
 
 project4a:
@@ -162,3 +164,5 @@ project4b:
 
 project4c:
 	$(GOTEST) ./kv/transaction/... -run 4C
+
+projectAll: project1 project2 project3 project4 

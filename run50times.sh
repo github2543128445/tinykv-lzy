@@ -9,20 +9,20 @@ check_fail() {
     fi
 }
 
-rm -rf ./out-50/*
+rm -rf ./out/*
 
 for ((i=1,j=50;i<=j;i++)); do
     echo "ROUND $i/$j"
-    make project3c > ./out-50/out-$i.txt
-
+    # 修改下方进行你想要的测试
+    make projectAll > ./out/out-$i.txt
     # 检查文件中是否包含“FAIL”
-    if check_fail "./out-50/out-$i.txt"; then
+    if check_fail "./out/out-$i.txt"; then
         # 如果没有“FAIL”，删除文件
-        rm ./out-50/out-$i.txt
-		echo "pass: out-$i.txt" >> ./out-50/finish.txt
+        rm ./out/out-$i.txt
+		echo "pass: out-$i.txt" >> ./out/finish.txt
     else
         # 如果有“FAIL”，将文件名追加到 finish.txt
-        echo "fail: out-$i.txt" >> ./out-50/finish.txt
+        echo "fail: out-$i.txt" >> ./out/finish.txt
     fi
 done
 

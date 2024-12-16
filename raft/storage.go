@@ -55,8 +55,6 @@ type Storage interface {
 	// [FirstIndex()-1, LastIndex()]. The term of the entry before
 	// FirstIndex is retained for matching purposes even though the
 	// rest of that entry may not be available.
-	// Term 返回索引为 i 的条目的任期，其必须在 [FirstIndex () - 1, LastIndex ()] 范围内。
-	// 尽管可能无法获取索引在 FirstIndex 之前的条目的其余部分，但为了匹配目的仍保留其任期。
 	Term(i uint64) (uint64, error)
 	// LastIndex returns the index of the last entry in the log.
 	LastIndex() (uint64, error)
@@ -69,10 +67,6 @@ type Storage interface {
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,
 	// so raft state machine could know that Storage needs some time to prepare
 	// snapshot and call Snapshot later.
-	// Snapshot 返回最新的快照。
-	// 如果快照暂时不可用，它应该返回 ErrSnapshotTemporarilyUnavailable，
-	// 以便 Raft 状态机知道 Storage 需要一些时间来准备
-	// 快照，并稍后调用 Snapshot。
 	Snapshot() (pb.Snapshot, error)
 }
 

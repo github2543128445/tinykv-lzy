@@ -12,78 +12,94 @@ import (
 
 // RawGet return the corresponding Get response based on RawGetRequest's CF and Key fields
 func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
-	reader, err := server.storage.Reader(req.Context)
-	if err != nil {
-		return nil, err
-	}
-	respon := &kvrpcpb.RawGetResponse{}
-	var val []byte
-	val, err = reader.GetCF(req.Cf, req.Key)
-	if err != nil {
-		return nil, err
-	}
-	respon.Value = val
-	respon.NotFound = false
-	if val == nil {
-		respon.NotFound = true
-	}
 	// Your Code Here (1).
-	return respon, err
+	r := &kvrpcpb.RawGetResponse{
+		NotFound: true,
+	}
+
+	reader, err := server.storage.Reader(nil)
+	if err != nil {
+		return r, err
+	}
+
+	v, err := reader.GetCF(req.Cf, req.Key)
+	if err != nil {
+		return r, err
+	}
+
+	if v != nil {
+		r.Value = v
+		r.NotFound = true
+	}
+	return r, nil
 }
 
 // RawPut puts the target data into storage and returns the corresponding response
 func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
 	// Your Code Here (1).
 	// Hint: Consider using Storage.Modify to store data to be modified
-	modi := storage.Modify{
-		Data: storage.Put{
-			Key:   req.Key,
-			Value: req.Value,
-			Cf:    req.Cf,
+	err := server.storage.Write(nil, []storage.Modify{
+		{
+			Data: storage.Put{
+				Cf:    req.Cf,
+				Key:   req.Key,
+				Value: req.Value,
+			},
 		},
-	}
-	batch := []storage.Modify{modi}
-	err := server.storage.Write(req.Context, batch)
+	})
+	r := &kvrpcpb.RawPutResponse{}
+
 	if err != nil {
-		return nil, err
+		return r, err
 	}
-	return &kvrpcpb.RawPutResponse{}, nil
+
+	return r, nil
 }
 
 // RawDelete delete the target data from storage and returns the corresponding response
 func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
 	// Your Code Here (1).
 	// Hint: Consider using Storage.Modify to store data to be deleted
-	modi := storage.Modify{
-		Data: storage.Delete{
-			Key: req.Key,
-			Cf:  req.Cf,
+	err := server.storage.Write(nil, []storage.Modify{
+		{
+			Data: storage.Delete{
+				Cf:  req.Cf,
+				Key: req.Key,
+			},
 		},
-	}
-	batch := []storage.Modify{modi}
-	err := server.storage.Write(req.Context, batch)
+	})
+	r := &kvrpcpb.RawDeleteResponse{}
+
 	if err != nil {
-		return nil, err
+		return r, err
 	}
-	return &kvrpcpb.RawDeleteResponse{}, nil
+
+	return r, nil
 }
 
 // RawScan scan the data starting from the start key up to limit. and return the corresponding result
 func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
 	// Your Code Here (1).
 	// Hint: Consider using reader.IterCF
-	reader, err := server.storage.Reader(req.Context)
-	if err != nil {
-		return nil, err
-	}
-	respon := &kvrpcpb.RawScanResponse{}
+	reader, err := server.storage.Reader(nil)
 	it := reader.IterCF(req.Cf)
-	limit := req.Limit
-	for it.Seek(req.StartKey); it.Valid() && limit > 0; it.Next() {
-		key := it.Item().Key()
-		value, _ := it.Item().Value()
-		respon.Kvs = append(respon.Kvs, &kvrpcpb.KvPair{Key: key, Value: value})
-		limit--
+	it.Seek(req.StartKey)
+	defer it.Close()
+
+	var kv_res []*kvrpcpb.KvPair
+	for i := 0; i < int(req.Limit); i++ {
+		if !it.Valid() {
+			break
+		}
+		v, _ := it.Item().Value()
+		kv_res = append(kv_res, &kvrpcpb.KvPair{
+			Key: it.Item().Key(), Value: v,
+		})
+		it.Next()
 	}
-	return respon, nil
+	r := &kvrpcpb.RawScanResponse{
+		Kvs: kv_res,
+	}
+
+	return r, err
 }
