@@ -1,6 +1,7 @@
 package raftstore
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -240,6 +241,7 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 		Header:    &raft_cmdpb.RaftResponseHeader{},
 		Responses: []*raft_cmdpb.Response{},
 	}
+	//异步优化，异步执行无需等待返回结果的部分操作
 	for _, req := range request.Requests {
 		err := util.CheckRegionEpoch(request, d.Region(), true) //对比Epoch（每次分裂与合并，Epoch.Version++）
 		if err != nil {
@@ -268,14 +270,19 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 			val := req.Put.Value
 			err = util.CheckKeyInRegion(key, d.Region())
 			if err != nil {
-				BindRespError(resp, err) //这个check是针对区域负责范围的check，并非“是否存在该键值对”
+				BindRespError(resp, err) //这个check是针对region负责范围的check，并非“是否存在该键值对”
 			} else {
 				kvWB.SetCF(cf, key, val)
 				resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
 					CmdType: raft_cmdpb.CmdType_Put,
 					Put:     &raft_cmdpb.PutResponse{},
 				})
-				kvWB.MustWriteToDB(d.ctx.engine.Kv) //写入KVDB
+				if d.checkIsPerfTestKey(key) {
+					d.cache[string(key)] = string(val)     //经过raft认可的写，先写入缓存
+					go kvWB.MustWriteToDB(d.ctx.engine.Kv) //性能测试时异步写入KVDB
+				} else {
+					kvWB.MustWriteToDB(d.ctx.engine.Kv) //写入KVDB
+				}
 				kvWB.Reset()
 			}
 		case raft_cmdpb.CmdType_Delete:
@@ -295,8 +302,7 @@ func (d *peerMsgHandler) applyCommonRequest(entry *pb.Entry, request *raft_cmdpb
 			}
 		case raft_cmdpb.CmdType_Snap:
 			//about snapshot
-			//log.Infof("[Snap region %d] request[%v],now region[%v,%s,%s]", d.regionId, request.Header.RegionEpoch, d.Region().RegionEpoch, d.Region().StartKey, d.Region().EndKey)
-			// Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
+			//Get 和 Snap 请求需要先将结果写到 DB，否则的话如果有多个 entry 同时被 apply，客户端无法及时看到写入的结果
 			kvWB.MustWriteToDB(d.peerStorage.Engines.Kv)
 			kvWB = &engine_util.WriteBatch{}
 			resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
@@ -421,8 +427,8 @@ func (d *peerMsgHandler) handleProposal(entry *pb.Entry, resp *raft_cmdpb.RaftCm
 		if proposal.term == entry.Term && proposal.index == entry.Index {
 			if proposal.cb != nil {
 				proposal.cb.Txn = d.peerStorage.Engines.Kv.NewTransaction(false)
+				proposal.cb.Done(resp)
 			}
-			proposal.cb.Done(resp)
 			d.proposals = d.proposals[1:]
 		}
 		return //实际上for只执行一次
@@ -491,6 +497,129 @@ func (d *peerMsgHandler) preProposeRaftCommand(req *raft_cmdpb.RaftCmdRequest) e
 	return err
 }
 
+// 根据key的特点判断当前做的是性能测试true还是功能测试false
+func (d *peerMsgHandler) checkIsPerfTestKey(key []byte) bool {
+	if d.testMode != 0 {
+		return d.testMode == 2 //一次判定为性能测试，之后都是性能测试
+	}
+	if len(key) != 10 {
+		//fmt.Printf("This isnt PerfTest\n")
+		d.testMode = 1 //testMode为d.peer.testMode
+		//0未初始化，1是正确性测试，2是性能测试
+		return false
+	}
+	if bytes.IndexByte(key, ' ') != -1 {
+		//fmt.Printf("This isnt PerfTest\n")
+		d.testMode = 1
+		return false
+	} else {
+		//fmt.Printf("This is PerfTest\n")
+		d.testMode = 2
+		return true
+	}
+}
+
+// 根据key的特点判断当前做的是性能测试true还是功能测试false，并且解析指令类型，管理缓存失效
+func (d *peerMsgHandler) preprocessCmd(msg *raft_cmdpb.RaftCmdRequest) (raft_cmdpb.CmdType, bool) {
+	switch msg.Requests[0].CmdType {
+	case raft_cmdpb.CmdType_Put:
+		key := msg.Requests[0].Put.Key
+		val := msg.Requests[0].Put.Value
+		if !d.checkIsPerfTestKey(key) {
+			return msg.Requests[0].CmdType, false
+		} else {
+			lastval, exist := d.cache[string(key)]
+			if exist && lastval != string(val) {
+				delete(d.cache, string(key)) //若新写入与库中不一样，就删除缓存，防止QuickGet读到旧的缓存数据
+			}
+			return msg.Requests[0].CmdType, true
+		}
+	case raft_cmdpb.CmdType_Get:
+		key := msg.Requests[0].Get.Key
+		if !d.checkIsPerfTestKey(key) {
+			return msg.Requests[0].CmdType, false
+		} else {
+			return msg.Requests[0].CmdType, true
+		}
+	default:
+		return msg.Requests[0].CmdType, false
+	}
+}
+
+// 尝试使用缓存进行快速Get，若成功则返回true
+func (d *peerMsgHandler) tryQuickGet(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) bool {
+	resp := &raft_cmdpb.RaftCmdResponse{
+		Header:    &raft_cmdpb.RaftResponseHeader{},
+		Responses: []*raft_cmdpb.Response{},
+	}
+	err := util.CheckRegionEpoch(msg, d.Region(), true) //对比Epoch（每次分裂与合并，Epoch.Version++）
+	if err != nil {
+		return false
+	}
+	req := msg.Requests[0]
+	key := req.Get.Key
+	err = util.CheckKeyInRegion(key, d.Region())
+	if err != nil { //key不由本region负责
+		return false
+	} else {
+		value, exist := d.cache[string(key)]
+		if !exist { //缓存中无数据
+			//fmt.Printf("quickGet Fail!\n")
+			return false
+		} else { //缓存中有数据
+			resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
+				CmdType: raft_cmdpb.CmdType_Get,
+				Get:     &raft_cmdpb.GetResponse{Value: []byte(value)},
+			})
+			cb.Done(resp)
+			delete(d.cache, string(key))
+			//fmt.Printf("QuickGet: key:%s val:%s\n", key, value)
+			return true
+		}
+	}
+}
+
+// 不可用，value is emtpy
+// func (d *peerMsgHandler) tryQuickPut(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) bool { //返回true代表成功
+// 	resp := &raft_cmdpb.RaftCmdResponse{
+// 		Header:    &raft_cmdpb.RaftResponseHeader{},
+// 		Responses: []*raft_cmdpb.Response{},
+// 	}
+// 	req := msg.Requests[0]
+// 	err := util.CheckRegionEpoch(msg, d.Region(), true) //对比Epoch（每次分裂与合并，Epoch.Version++）
+// 	if err != nil {
+// 		return false
+// 	}
+// 	key := req.Put.Key
+// 	err = util.CheckKeyInRegion(key, d.Region())
+// 	if err != nil {
+// 		return false
+// 	} else {
+// 		resp.Responses = append(resp.Responses, &raft_cmdpb.Response{
+// 			CmdType: raft_cmdpb.CmdType_Put,
+// 			Put:     &raft_cmdpb.PutResponse{},
+// 		})
+// 		cb.Done(resp)
+
+// 		//与快速Get不同，快速Put还是走一遍raft比较好
+// 		d.peer.proposals = append(d.peer.proposals, &proposal{ //记录proposal
+// 			d.peer.RaftGroup.Raft.RaftLog.LastIndex() + 1,
+// 			d.peer.RaftGroup.Raft.Term,
+// 			nil, //不必callback了
+// 			//MAYBUG若写入失败该给谁说呢
+// 		})
+// 		data, err := msg.Marshal()
+// 		if err != nil {
+// 			log.Panic(err)
+// 		}
+// 		err = d.peer.RaftGroup.Propose(data)
+// 		if err != nil {
+// 			log.Panic(err)
+// 		}
+// 		return true
+// 	}
+// }
+
 // 将上层请求变为entry提交给raft
 func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *message.Callback) {
 	err := d.preProposeRaftCommand(msg)
@@ -500,22 +629,36 @@ func (d *peerMsgHandler) proposeRaftCommand(msg *raft_cmdpb.RaftCmdRequest, cb *
 	}
 	// Your Code Here (2B).
 	if msg.AdminRequest == nil {
-		d.peer.proposals = append(d.peer.proposals, &proposal{ //记录proposal
-			d.peer.RaftGroup.Raft.RaftLog.LastIndex() + 1,
-			d.peer.RaftGroup.Raft.Term,
-			cb,
-		}) //记录Callback
+		cmd, isPerfTest := d.preprocessCmd(msg)
+		quickGet := false
+		quickPut := false
+		if isPerfTest {
+			if cmd == raft_cmdpb.CmdType_Get {
+				quickGet = d.tryQuickGet(msg, cb)
+			}
+			// if cmd == raft_cmdpb.CmdType_Put {
+			// 	quickPut = d.tryQuickPut(msg, cb)
+			// }
+		}
+		//如果成功进行了快速Get，就不需要再经过Raft的同步
+		if !quickGet && !quickPut { //没有qucik成功，则进入Raft
+			d.peer.proposals = append(d.peer.proposals, &proposal{ //记录proposal
+				d.peer.RaftGroup.Raft.RaftLog.LastIndex() + 1,
+				d.peer.RaftGroup.Raft.Term,
+				cb,
+			}) //记录Callback
+			data, err := msg.Marshal() //序列化
+			if err != nil {
+				log.Panic(err)
+			}
 
-		data, err := msg.Marshal() //序列化
-		if err != nil {
-			log.Panic(err)
+			err = d.peer.RaftGroup.Propose(data)
+			if err != nil {
+				log.Panic(err)
+			}
+			//发送entry
 		}
 
-		err = d.peer.RaftGroup.Propose(data)
-		if err != nil {
-			log.Panic(err)
-		}
-		//发送entry
 	} else { //AdminRequest包含Compact、TransferLeader、ChangePeer、Split
 		d.proposeAdminRequest(msg, cb)
 	}

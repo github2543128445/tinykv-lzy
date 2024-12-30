@@ -1,0 +1,1 @@
+pass: out-1.txt

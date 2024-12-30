@@ -1,0 +1,109 @@
+2024-12-16 11:29:11 QPS 438.99633158760133
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m4.436620933s, Total Requests: 80967
+    bench_test.go:75: QPS: 438.99633158760133
+--- PASS: TestReadWrite (188.08s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	188.352s
+
+
+2024-12-16 14:17:29 QPS 442.5401568303464
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m5.474693614s, Total Requests: 82080
+    bench_test.go:75: QPS: 442.5401568303464
+--- PASS: TestReadWrite (188.87s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	189.095s
+
+2024-12-19 17:33:49 QPS 499.8451622477756
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m4.095009715s, Total Requests: 92019
+    bench_test.go:75: QPS: 499.8451622477756
+--- PASS: TestReadWrite (187.56s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	187.832s
+
+
+2024-12-19 17:37:29 QPS 514.8630112189268
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m3.63525431s, Total Requests: 94547
+    bench_test.go:75: QPS: 514.8630112189268
+--- PASS: TestReadWrite (187.19s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	187.474s
+
+
+2024-12-19 18:41:59 QPS 519.3239562879677
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m3.686885315s, Total Requests: 95393
+    bench_test.go:75: QPS: 519.3239562879677
+--- PASS: TestReadWrite (187.26s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	187.588s
+
+
+2024-12-19 19:08:53 QPS 506.69748987256406
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m3.695403787s, Total Requests: 93078
+    bench_test.go:75: QPS: 506.69748987256406
+--- PASS: TestReadWrite (187.25s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	187.499s
+
+
+2024-12-20 14:33:59 QPS 1049.0698481969894
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m0.958398839s, Total Requests: 189838
+    bench_test.go:75: QPS: 1049.0698481969894
+--- PASS: TestReadWrite (184.64s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	184.894s
+
+
+2024-12-20 14:37:36 QPS 1033.6849718303563
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m0.95261622s, Total Requests: 187048
+    bench_test.go:75: QPS: 1033.6849718303563
+--- PASS: TestReadWrite (184.60s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	184.812s
+
+上面是node2的
+下面是node3的
+
+这是只加缓存优化的速度
+2024-12-27 15:28:28 QPS 2716.544571076263
+=== RUN   TestReadWrite
+    bench_test.go:87: Total Duration: 3m5.55962798s, Total Requests: 504081
+    bench_test.go:88: QPS: 2716.544571076263
+--- PASS: TestReadWrite (194.37s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	194.810s
+
+
+2024-12-27 15:34:14 QPS 2661.340729487508
+=== RUN   TestReadWrite
+    bench_test.go:87: Total Duration: 3m5.160056561s, Total Requests: 492774
+    bench_test.go:88: QPS: 2661.340729487508
+--- PASS: TestReadWrite (194.18s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	194.593s
+
+2024-12-27 15:50:00 QPS 6622.960044303616
+=== RUN   TestReadWrite
+    bench_test.go:87: Total Duration: 3m1.196472872s, Total Requests: 1200057
+    bench_test.go:88: QPS: 6622.960044303616
+--- PASS: TestReadWrite (190.39s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	192.868s
+
+
+2024-12-30 15:30:34 QPS 6395.4311734460625
+=== RUN   TestReadWrite
+    bench_test.go:74: Total Duration: 3m0.642707062s, Total Requests: 1155288
+    bench_test.go:75: QPS: 6395.4311734460625
+--- PASS: TestReadWrite (188.38s)
+PASS
+ok  	github.com/pingcap-incubator/tinykv/kv/test_raftstore	190.621s
+
+

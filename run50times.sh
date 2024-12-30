@@ -9,6 +9,10 @@ check_fail() {
     fi
 }
 
+if [ ! -d "out" ]; then
+  # 如果不存在，创建文件夹 out
+  mkdir out
+fi
 rm -rf ./out/*
 
 for ((i=1,j=50;i<=j;i++)); do
